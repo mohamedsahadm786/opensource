@@ -1,0 +1,13 @@
+# secrets
+.env
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# pipeline outputs & scratch
+outputs/
+*.log
+*.bak*
+# heavy assets that live on the pod, not in git
+models/

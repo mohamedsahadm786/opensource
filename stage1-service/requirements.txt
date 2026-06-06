@@ -1,0 +1,6 @@
+# Only the extra deps the service needs ON TOP OF the repo's existing venv
+# (/workspace/ai-toolkit/venv already has torch, diffusers, PuLID, pillow).
+fastapi
+uvicorn[standard]
+python-multipart
+requests
