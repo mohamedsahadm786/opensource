@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import math
 import random
 import subprocess
 import sys
@@ -30,11 +31,17 @@ from video_pipeline import step_5_video_wan as wan
 from video_pipeline import step_6_lipsync as lip
 from video_pipeline.multishot import script_builder_multi
 from video_pipeline.multishot import stitch as stitcher
+from video_pipeline.silentfirst import frame_join
 from video_pipeline import extend_tail
 
 VOICE_BY_GENDER = {"female": "voices_examples/female/female_02.wav",
                    "male": "voices_examples/male/male_01.wav"}
 _NULL = subprocess.DEVNULL
+
+# Wan 2.2 I2V native window: 81 frames @ 16fps (~5s). Never exceed this in one render.
+SAFE_FRAMES = 81
+SAFE_FPS = 16
+SAFE_SECONDS = SAFE_FRAMES / SAFE_FPS
 
 
 def _voice_for(account: dict) -> str:
@@ -94,6 +101,33 @@ def _pad_audio(audio, out_wav, intro=0.0, outro=0.0):
     return str(out_wav)
 
 
+def _render_capped_footage(wan_h, image_path, out_silent, motion, neg,
+                           need_seconds, base_seed, tag, punch_in=1.2, max_iters=8):
+    """Build this shot's silent footage without ever rendering past Wan's native
+    81-frame window. Render >=1 clips of SAFE_FRAMES each and frame-join them until
+    the footage covers need_seconds. One clip -> frame_join returns it unchanged
+    (no seam, full native quality). Returns (joined_path, n_clips)."""
+    work = Path(out_silent).parent / "_chunks"
+    work.mkdir(parents=True, exist_ok=True)
+    chunk_frames = wan.frames_for_duration(SAFE_SECONDS, cap=SAFE_FRAMES)  # == 81
+
+    def render(idx):
+        v = wan.generate(wan_h, image_path, work / f"c{idx}", motion_prompt=motion,
+                         negative_prompt=neg, num_frames=chunk_frames,
+                         seed=base_seed + idx, scene_id=f"{tag}/c{idx}")
+        return v["local_path"]
+
+    clips = [render(i + 1) for i in range(max(1, math.ceil(need_seconds / SAFE_SECONDS)))]
+    it = 0
+    while True:
+        it += 1
+        frame_join.join(clips, out_silent, punch_in=punch_in)
+        if _dur(out_silent) >= need_seconds or it >= max_iters:
+            break
+        clips.append(render(len(clips) + 1))
+    return str(out_silent), len(clips)
+
+
 def build_one(account, output, num_shots, base_seed, run_dir, handles,
               target_seconds=10, intro_seconds=2.0, outro_seconds=2.0, tail_seconds=0.0,
               lips_expression=2.0, inference_steps=40):
@@ -132,14 +166,16 @@ def build_one(account, output, num_shots, base_seed, run_dir, handles,
             audio_seconds = _dur(audio_path)
             print(f"    shot {i+1}: padded (+{intro_i:.0f}s intro, +{outro_i:.0f}s outro) -> {audio_seconds:.2f}s")
 
-        frame_cap = int((target_seconds + 3 + intro_i + outro_i) * 16)
-        n_frames = wan.frames_for_duration(audio_seconds, cap=frame_cap)
-        v = wan.generate(wan_h, image_path, shot_dir / "silent",
-                         motion_prompt=sh["wan_motion_prompt"],
-                         negative_prompt=sh.get("wan_negative_prompt"),
-                         num_frames=n_frames,
-                         seed=base_seed + 1 + i, scene_id=tag)
-        f = lip.generate(lip_h, v["local_path"], audio_path, shot_dir / "final",
+        # render footage WITHOUT exceeding Wan's native 81-frame window: chunk +
+        # frame-join until it covers this shot's (padded) audio. <=5s shot => one
+        # native clip (passed through, no seam); longer => auto-split native clips.
+        silent_path, n_chunks = _render_capped_footage(
+            wan_h, image_path, shot_dir / "silent.mp4",
+            sh["wan_motion_prompt"], sh.get("wan_negative_prompt"),
+            need_seconds=audio_seconds, base_seed=base_seed + 1 + i * 100, tag=tag)
+        if n_chunks > 1:
+            print(f"    shot {i+1}: covered {audio_seconds:.2f}s with {n_chunks} native clips (joined)")
+        f = lip.generate(lip_h, silent_path, audio_path, shot_dir / "final",
                          lips_expression=lips_expression, inference_steps=inference_steps,
                          scene_id=tag)
         final_clips.append(f["local_path"])
@@ -147,8 +183,8 @@ def build_one(account, output, num_shots, base_seed, run_dir, handles,
             "index": i + 1, "dialogue": sh["dialogue"],
             "audio": audio_path, "audio_seconds": audio_seconds,
             "intro_silence": intro_i, "outro_silence": outro_i,
-            "silent": v["local_path"], "num_frames": v["num_frames"], "fps": v["fps"],
-            "final": f["local_path"], "audio_seed": base_seed, "video_seed": base_seed + 1 + i,
+            "silent": silent_path, "num_chunks": n_chunks, "fps": SAFE_FPS,
+            "final": f["local_path"], "audio_seed": base_seed, "video_seed": base_seed + 1 + i * 100,
         })
 
     stitched = out_dir / "stitched.mp4"
