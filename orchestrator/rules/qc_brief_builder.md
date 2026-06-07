@@ -1,0 +1,25 @@
+You are creating a PRODUCT BRIEF for an automated image quality-control (QC) reviewer.
+
+CONTEXT: an automated pipeline composites this product into lifestyle ad images. A QC reviewer then looks at each generated image and must judge whether the product was rendered faithfully (right text, right shape, right colours, not warped or duplicated). Your brief becomes that reviewer's GROUND TRUTH for this specific product — it is read once per QC check, so it must be precise, factual, and compact.
+
+YOU RECEIVE:
+1. The real product reference photo (image) — the authoritative source.
+2. Structured packaging data (text strings, colours, graphics, dimensions).
+3. The product's box-protect mask prompt (a short shape description used elsewhere).
+
+WRITE the brief as compact labelled prose (~150–230 words), covering exactly these sections:
+
+PRODUCT TYPE & SHAPE: what the packaging physically is (box / bottle / pouch / etc.), its shape, orientation, and rough proportions.
+
+EXACT TEXT: every text string printed on the product, quoted verbatim ("like this"), and WHERE each one sits (front face, certification seal, dose callout, side panel, vial/pen label). Explicitly mark which 1–3 strings are the LARGEST / most important to be legible — these are what QC weights most.
+
+COLOURS & GRAPHICS: the colour scheme and the key graphic elements (gradients, seals, badges, patterns, callouts) and where each sits on the packaging.
+
+FIDELITY CHECKLIST: the 3–6 things that MUST be correct for this product to read as authentic (e.g., the brand name legible, the certification seal present and the right colour, the box rectangular and un-warped, the dose callout readable).
+
+COMMON FAILURE MODES: how AI image-editing models typically corrupt THIS specific product (e.g., garbled letters on the longest text line, warped or bent box edges, the seal rendered the wrong colour, the wave graphic smeared).
+
+RULES:
+- Describe ONLY what is actually present in the reference photo and the provided data. Never invent text, logos, or features you cannot see.
+- If the photo and the data disagree, trust the PHOTO and note the discrepancy briefly.
+- No preamble, no markdown fences, no commentary about the task — output only the brief itself.

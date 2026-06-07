@@ -28,12 +28,15 @@ ANATOMY:
 PLACEMENT (logical, not perfect):
 7. placement_illogical: is the way the person holds or is positioned with the product clearly ILLOGICAL — product floats unsupported, the grip is one no real hand could make, or the body pose is physically absurd? A slightly awkward but physically possible pose is FINE. (expected: false)
 
-PRODUCT:
-8. product_visible: is the product box visible? (expected: true)
-9. multiple_distinct_products: are there 2 OR MORE separate copies of the product box? (a mirror reflection does NOT count) (expected: false)
-10. product_shape_broken: is the box warped, melted, or bent into a non-rectangular impossible shape? Minor perspective/angle is FINE. (expected: false)
-11. product_text_legible: the box should show text including {{PRODUCT_STRINGS}}. Are the main / most-prominent text strings at least ~80% legible and recognisable — a viewer can clearly read them, even if a letter or two is slightly off? (expected: true)
-12. box_theme_ok: does the box match this packaging — {{BOX_THEME}} — at roughly 80%+? Exact content not required, just the overall shape/colours/graphics. (expected: true)
+=== PRODUCT REFERENCE — ground truth for THIS product (compare the rendered product against this) ===
+{{PRODUCT_REFERENCE}}
+
+PRODUCT (judge the rendered product against the PRODUCT REFERENCE above):
+8. product_visible: is the product visible in the scene? (expected: true)
+9. multiple_distinct_products: are there 2 OR MORE separate copies of the product? (a mirror reflection does NOT count) (expected: false)
+10. product_shape_broken: is the product warped, melted, or bent into an impossible shape vs the reference? Minor perspective/angle is FINE. (expected: false)
+11. product_text_legible: are the product's main / most-prominent text strings (the ones the reference marks as largest/most important) at least ~80% legible and recognisable — a viewer can clearly read them, even if a letter or two is slightly off? (expected: true)
+12. box_theme_ok: does the product match the reference's shape, colours and key graphics at roughly 80%+? Exact content not required. (expected: true)
 
 Then provide:
 - specific_issues: short list of ONLY the real defects found. Each item a SHORT imperative phrase (e.g. "doubled palm on the left hand", "extra hand-mass on the right wrist", "product text garbled"). Empty list if the image is acceptable.

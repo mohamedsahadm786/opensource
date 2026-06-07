@@ -63,9 +63,21 @@ def _box_theme(product: dict) -> str:
     return "; ".join(parts) or "a clean rectangular product box"
 
 
+def _fallback_reference(product: dict) -> str:
+    return (f"Product: {product.get('name') or 'the product'}. "
+            f"The packaging should show the text strings {_product_strings(product)}. "
+            f"Packaging: {_box_theme(product)}. "
+            "Treat the largest / most prominent of these text strings as the most important to be legible.")
+
+
+def _reference(product: dict) -> str:
+    """Prefer the one-time vision-generated qc_brief; fall back to raw packaging."""
+    return (product.get("qc_brief") or "").strip() or _fallback_reference(product)
+
+
 def _prompts(product: dict) -> tuple[str, str]:
     raw = (RULES_DIR / "qc.md").read_text(encoding="utf-8")
-    raw = raw.replace("{{PRODUCT_STRINGS}}", _product_strings(product)).replace("{{BOX_THEME}}", _box_theme(product))
+    raw = raw.replace("{{PRODUCT_REFERENCE}}", _reference(product))
     system, _, rubric = raw.partition("===RUBRIC===")
     return system.strip(), rubric.strip()
 
@@ -190,8 +202,10 @@ def main() -> None:
         sys.exit(f"[qc] no step2 composite for scenario {sys.argv[2]!r} — run step2 first")
     asset = sb().table("media_assets").select("bucket,path,mime_type").eq("id", out[0]["step2_asset_id"]).limit(1).execute().data[0]
     image_bytes = sb().storage.from_(asset["bucket"]).download(asset["path"])
-    product = sb().table("products").select("name,packaging").eq("tenant_id", tenant_id).limit(1).execute().data[0]
+    product = sb().table("products").select("name,packaging,qc_brief,qc_max_retries").eq("tenant_id", tenant_id).limit(1).execute().data[0]
     api_key = sb().rpc("get_tenant_anthropic_key", {"p_tenant_id": tenant_id}).execute().data
+    using = "stored qc_brief" if (product.get("qc_brief") or "").strip() else "FALLBACK packaging (no qc_brief yet — run generate_qc_brief.py for best accuracy)"
+    print(f"[qc] product reference: {using} | qc_max_retries={product.get('qc_max_retries')}")
     decision = validate(image_bytes, asset.get("mime_type") or "image/jpeg", product, api_key, sys.argv[2])
     print("\n" + json.dumps({k: decision[k] for k in ("passed", "score", "recommendation", "confidence", "issues", "checks")}, indent=2))
 
