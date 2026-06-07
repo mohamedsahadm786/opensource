@@ -228,10 +228,12 @@ def main() -> None:
     print("\n--- PHASE B: scene -> product -> realism ---")
     total = 0
     for acct in accounts:
-        prows = sb().table("personas").select("id").eq("tiktok_account_id", acct["id"]).limit(1).execute().data
+        prows = sb().table("personas").select("id,appearance_spec").eq("tiktok_account_id", acct["id"]).limit(1).execute().data
         if not prows:
             print(f"[{acct['tiktok_id']}] no persona — skipping (portrait may have failed)"); continue
         persona = prows[0]
+        if not persona.get("appearance_spec"):
+            print(f"[{acct['tiktok_id']}] persona has no appearance_spec (pre-fix portrait) — skipping; regenerate the portrait first"); continue
         api_key = RSC.get_anthropic_key(acct["tenant_id"])
         scenarios = pick_scenarios(persona["id"], args.scenarios)
         if not scenarios:
