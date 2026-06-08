@@ -44,6 +44,7 @@ import run_step3 as RS3
 import run_video as RV
 import script_gen as SG
 import qc as QC
+import engine as ENG
 
 HERE = Path(__file__).resolve().parent
 OPUS_MODEL = os.environ.get("OPUS_MODEL", "claude-opus-4-7")
@@ -365,11 +366,16 @@ def main() -> None:
     n_scen = args.scenarios if args.scenarios is not None else int((cfg or {}).get("num_videos_per_account") or 1)
     controls = RV.resolve_controls(cfg, _CtlArgs(args))
 
+    # learning phase: exploration walks the curated set; active SELECTS via Thompson sampling
+    state = ENG.engine_state(sb(), tenant_id)
+    engine_on = bool(state.get("engine_enabled")) and state.get("phase") == "active"
+
     print("=" * 60)
     print("ALLUVI pipeline")
     print(f"accounts: {', '.join(a['tiktok_id'] for a in accounts)}")
     print(f"per account: {n_scen} | step3: {'on' if STEP3_ENABLED else 'off'} | QC: {'on' if QC_ENABLED else 'off'}"
           f" | video: {'off' if args.skip_videos else controls['video_mode']}")
+    print(f"engine: {'ACTIVE — selecting scenarios' if engine_on else 'exploration — walking the curated set'}")
     print("=" * 60)
 
     # PHASE A — portraits (FLUX loads on first create; freed after the batch)
@@ -396,7 +402,10 @@ def main() -> None:
         if not persona.get("appearance_spec"):
             print(f"[{acct['tiktok_id']}] persona has no appearance_spec (pre-fix portrait) — skipping; regenerate the portrait first"); continue
         api_key = RSC.get_anthropic_key(acct["tenant_id"])
-        scenarios = pick_scenarios(persona["id"], n_scen)
+        if engine_on:
+            scenarios = ENG.select_scenarios(sb(), acct["tenant_id"], persona["id"], acct.get("country"), n_scen)
+        else:
+            scenarios = pick_scenarios(persona["id"], n_scen)
         if not scenarios:
             print(f"[{acct['tiktok_id']}] all requested scenarios already complete ✓"); continue
         for i, s in enumerate(scenarios, 1):
@@ -444,6 +453,20 @@ def main() -> None:
             print("\n--- freeing video stack (Wan + F5 + LatentSync) ---")
             j = _poll(_enqueue_free(tenant_id, ["video"]))
             print(f"   {'freed: video stack ✓' if j.get('status') == 'succeeded' else '(warn) free ' + str(j.get('status'))}")
+
+    # lifecycle: turn the engine ON automatically once the curated set is worked through
+    # (succeeded OR QC-skipped). Idempotent; never flips back.
+    flip = ENG.maybe_flip_engine(sb(), tenant_id)
+    prog = (f"{flip.get('resolved')}/{flip.get('active_curated')}"
+            if flip.get("active_curated") is not None else "?")
+    if flip.get("flipped"):
+        print("\n" + "*" * 60)
+        print(f"ENGINE ACTIVATED  curated set complete ({prog}) — future runs SELECT via Thompson sampling.")
+        print("*" * 60)
+    elif flip.get("phase") == "active":
+        print(f"\n[engine] active — selecting ({prog} curated resolved)")
+    else:
+        print(f"\n[engine] exploration — coverage {flip.get('pct_complete', 0)}% ({prog} curated resolved)")
 
     print("\n" + "=" * 60)
     print(f"PIPELINE COMPLETE ✓   ({total} image(s), {videos_made} video(s))")

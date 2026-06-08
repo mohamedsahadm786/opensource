@@ -1,8 +1,15 @@
 -- ============================================================================
--- ALLUVI PIPELINE — ENTERPRISE MULTI-TENANT SCHEMA  (migration 001, rev 2)
+-- ALLUVI PIPELINE — COMPLETE CURRENT SCHEMA  (consolidated through migration 016)
 -- ----------------------------------------------------------------------------
--- Target:  a NEW, EMPTY Supabase project (Pro). Run top-to-bottom ONCE in the
---          Supabase SQL Editor. Safe to re-run (IF NOT EXISTS / drop-if-exists).
+-- This is the FULL up-to-date schema: migration 001 with every later DDL change
+-- merged in (002 gpu config, 005 job-queue fields, 007 claim_next_job, 008 vault
+-- RPC, 010 drop do_dont + products qc_brief, 011 voice refs + tenant_pipeline_config,
+-- 012 script_company_info/script_directives/product_info, 013 engine tables + view,
+-- 015 exploration-gate view, 016 tuning fields). Run top-to-bottom ONCE on a NEW,
+-- EMPTY Supabase project (Pro). Safe to re-run (IF NOT EXISTS / drop-if-exists).
+-- Structure only — tenant DATA seeds (accounts, scenarios, brand/product content,
+-- config + learning-state rows) live in their own migration files, not here.
+-- ----------------------------------------------------------------------------
 --
 -- LOCKED DESIGN DECISIONS (this revision):
 --   1. One tenant = one company = one brand = ONE product. products has a
@@ -64,7 +71,9 @@ create table if not exists public.tenants (
   -- video/dialogue config (was alluvi_information.json): system_identity,
   -- brand_personality, dialogue_generation_rules, scene_generation_system...
   video_config          jsonb not null default '{}'::jsonb,
-  do_dont               text,                                -- compliance do/don't
+  -- script-generation inputs (migration 012): per-tenant company/brand knowledge + directives
+  script_company_info   jsonb,                               -- system_identity, brand_personality, marketing_language_engine, ...
+  script_directives     jsonb,                               -- dialogue_generation_rules + ai_generation_priorities
   -- GPU connection (the part that changes on RunPod restart lives HERE, once):
   gpu_provider          text not null default 'runpod',      -- runpod | own_gpu
   gpu_host              text,                                 -- RunPod pod-id, or your server host/IP (the CHANGING value)
@@ -154,6 +163,12 @@ create table if not exists public.products (
   -- ALLUVI_MASK_PROMPT env at call time. Required, validate non-empty on the web form.
   mask_prompt        text not null default 'white product box package, white rectangular box',
   reference_asset_id uuid references public.media_assets(id) on delete set null,  -- the real product photo
+  -- QC reference brief (migration 010): one-time Claude-vision ground truth + retry control
+  qc_brief              text,
+  qc_brief_generated_at timestamptz,
+  qc_max_retries        int not null default 3,              -- total attempts = 1 + qc_max_retries
+  -- product knowledge for video script generation (migration 012)
+  product_info          jsonb,
   status             text not null default 'active',
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now(),
@@ -172,8 +187,13 @@ create table if not exists public.scenarios (
   archetype     text,                                        -- held_product_high | placed_on_surface ...
   difficulty    text,                                        -- easy | medium | hard
   spec          jsonb not null,                              -- the COMPLETE scenario object
-  source        text not null default 'hardcoded',           -- hardcoded | tiktok_scrape
+  source        text not null default 'hardcoded',           -- hardcoded | curated | tiktok_scrape | generated
   is_active     boolean not null default true,
+  -- engine fields (migration 013): canonical attribute snapshot (our vocab) + versioning
+  composed_attributes jsonb not null default '{}'::jsonb,
+  version             text not null default 'v1',
+  content_hash        text,
+  scenario_title      text,
   created_at    timestamptz not null default now()
 );
 
@@ -208,6 +228,9 @@ create table if not exists public.tiktok_accounts (
   country          text,
   language         text,
   identity_factors jsonb not null default '{}'::jsonb,       -- inputs to persona-appearance builder
+  -- optional voice reference for F5-TTS cloning (migration 011); NULL on both -> gender default voice
+  voice_reference_asset_id uuid references public.media_assets(id) on delete set null,
+  voice_reference_text     text,                             -- transcript of the sample (F5 needs ref text)
   status           text not null default 'active',
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now(),
@@ -464,6 +487,247 @@ create index if not exists idx_jobs_queue
   on public.jobs (scheduled_at, priority) where status = 'queued';
 
 -- ============================================================================
+-- 18b. TENANT PIPELINE CONFIG  (migration 011 — web execution page writes this)
+--      num_shots = ceil(video_duration_seconds / shot_seconds); one clip per shot.
+-- ============================================================================
+create table if not exists public.tenant_pipeline_config (
+  tenant_id              uuid primary key references public.tenants(id) on delete cascade,
+  creation_mode          text not null default 'all',        -- 'all' | 'new_only' | 'specific'
+  target_account_id      uuid references public.tiktok_accounts(id) on delete set null,
+  num_videos_per_account int  not null default 1,            -- n videos = n scenarios = n images
+  video_mode             text not null default 'multishot',  -- 'multishot' | 'silentfirst'
+  video_duration_seconds int  not null default 10,
+  shot_seconds           int  not null default 5,
+  lips_expression        numeric not null default 2.0,       -- silentfirst fine knobs
+  inference_steps        int  not null default 40,
+  intro_seconds          int  not null default 2,
+  outro_seconds          int  not null default 2,
+  punch_in               numeric not null default 1.2,
+  threshold              int  not null default 70,
+  tail_seconds           int  not null default 0,
+  seed                   int,
+  step_3_enabled         boolean not null default true,      -- stage toggles
+  qc_enabled             boolean not null default true,
+  updated_at             timestamptz not null default now(),
+  constraint creation_mode_chk check (creation_mode in ('all','new_only','specific')),
+  constraint video_mode_chk    check (video_mode  in ('multishot','silentfirst'))
+);
+
+-- ============================================================================
+-- 18c. RECOMMENDATION / TUNING ENGINE  (migrations 013 + 016)
+--      scenarios + attribute_priors are UNIVERSAL; ratings/stats/tuning/state are PER-TENANT.
+--
+-- Rubric contract (the web writes these exact ids into asset_ratings.image/.video):
+--   IMAGE gates(8): img_product_present, img_color_fidelity, img_shape_dimensions,
+--                   img_brand_text, img_productname_text, img_grip_logic,
+--                   img_persona_identity, img_scene_logic
+--   IMAGE scores(5): img_scene_adherence, img_aesthetic, img_detail_realism,
+--                    img_lighting, img_ad_worthiness(commercial)
+--   VIDEO gates(5): vid_product_identity, vid_persona_identity, vid_no_artifacts,
+--                   vid_grip_maintained, vid_brand_text_motion
+--   VIDEO scores(7): vid_motion_smoothness, vid_temporal_stability, vid_dynamic_degree,
+--                    vid_camera_motion, vid_physical_plausibility, vid_imaging_quality,
+--                    vid_hook_strength(commercial)
+--   gates store {"result":"Pass"|"Fail",...}; scores are 1..5 (omit if unrated).
+-- ============================================================================
+
+-- one row per output (the web upserts by output_id)
+create table if not exists public.asset_ratings (
+  id                  uuid primary key default gen_random_uuid(),
+  tenant_id           uuid not null references public.tenants(id) on delete cascade,
+  output_id           uuid not null references public.outputs(id) on delete cascade,
+  image               jsonb,                       -- {gates:{id:{result,...}}, scores:{id:1..5}}
+  video               jsonb,                       -- same shape with vid_* ids
+  image_rated         boolean not null default false,
+  video_rated         boolean not null default false,
+  decision            text,                        -- accept | reject | flag (UI DECISION control)
+  composed_attributes jsonb,                       -- immutable snapshot at rating time
+  scenario_version    text,
+  rated_by            text,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  unique (output_id)
+);
+
+-- per-tenant sufficient statistics + cached shrunk estimate (rebuilt by the recompute job)
+create table if not exists public.attribute_stats (
+  id            uuid primary key default gen_random_uuid(),
+  tenant_id     uuid not null references public.tenants(id) on delete cascade,
+  context_key   text not null default 'global',     -- 'global' | 'country=<c>'
+  attribute_key text not null,                       -- e.g. 'lighting=golden_hour'
+  dimension     text not null,                       -- a rubric dimension id
+  kind          text not null,                       -- 'gate' | 'score'
+  n             int     not null default 0,
+  passes        int     not null default 0,
+  sum_val       numeric not null default 0,
+  sum_sq        numeric not null default 0,
+  estimate      numeric,
+  updated_at    timestamptz not null default now(),
+  unique (tenant_id, context_key, attribute_key, dimension)
+);
+
+-- GLOBAL cold-start priors (shared like scenarios; written by the recompute job)
+create table if not exists public.attribute_priors (
+  id            uuid primary key default gen_random_uuid(),
+  context_key   text not null default 'global',
+  attribute_key text not null,
+  dimension     text not null,
+  kind          text not null,
+  n             int     not null default 0,
+  passes        int     not null default 0,
+  sum_val       numeric not null default 0,
+  sum_sq        numeric not null default 0,
+  estimate      numeric,
+  updated_at    timestamptz not null default now(),
+  unique (context_key, attribute_key, dimension)
+);
+
+-- per-tenant prompt/script edits (candidate -> testing -> validated/rejected)
+create table if not exists public.tuning_suggestions (
+  id                uuid primary key default gen_random_uuid(),
+  tenant_id         uuid not null references public.tenants(id) on delete cascade,
+  scope_type        text not null,                   -- 'attribute' | 'scenario'
+  scope_key         text not null,                   -- e.g. 'lighting=overcast'
+  dimension         text not null,
+  context_key       text not null default 'global',  -- (migration 016)
+  cause             text,
+  suggested_edit    text,
+  status            text not null default 'candidate'
+    check (status in ('candidate','testing','validated','rejected')),
+  evidence_n        int not null default 0,
+  score_delta       numeric,
+  baseline_estimate numeric,                          -- (migration 016) pre/post A/B baseline
+  baseline_n        int,                              -- (migration 016)
+  source_output_id  uuid references public.outputs(id) on delete set null,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+create unique index if not exists uq_tuning_scope
+  on public.tuning_suggestions (tenant_id, scope_type, scope_key, dimension, context_key);
+
+-- per-tenant lifecycle (exploration -> active); flips ON once the curated set is worked through
+create table if not exists public.tenant_learning_state (
+  tenant_id              uuid primary key references public.tenants(id) on delete cascade,
+  phase                  text not null default 'exploration',   -- exploration | active
+  engine_enabled         boolean not null default false,
+  min_coverage_pct       int not null default 100 check (min_coverage_pct between 1 and 100),
+  exploration_started_at timestamptz default now(),
+  engine_enabled_at      timestamptz,
+  updated_at             timestamptz not null default now()
+);
+
+-- ============================================================================
+-- 18d. EXPLORATION-PROGRESS VIEW  (migrations 013 + 015)
+--   A curated scenario is "resolved" for a tenant once it is WORKED THROUGH to a terminal
+--   state: image done (status='step3_done', covers QC-pass AND QC-exhaust) OR QC terminated.
+--   No video-rating requirement — so the engine flips on even if some scenarios were QC-skipped.
+-- ============================================================================
+create or replace view public.v_tenant_exploration_progress as
+with curated as (
+  select count(*)::int as active_curated
+  from public.scenarios
+  where coalesce(source, '') <> 'generated' and is_active
+),
+resolved as (
+  select o.tenant_id, count(distinct o.scenario_id)::int as resolved_curated
+  from public.outputs o
+  join public.scenarios s
+    on s.id = o.scenario_id and coalesce(s.source, '') <> 'generated' and s.is_active
+  where o.status = 'step3_done'
+     or o.qc_status in ('passed', 'exhausted', 'skipped', 'fail', 'failed')
+  group by o.tenant_id
+)
+select
+  p.id as tenant_id,
+  (select active_curated from curated) as active_curated,
+  coalesce(r.resolved_curated, 0) as resolved_curated,
+  case when (select active_curated from curated) > 0
+       then round(100.0 * coalesce(r.resolved_curated, 0) / (select active_curated from curated))::int
+       else 0 end as pct_complete,
+  (coalesce(r.resolved_curated, 0) >= (select active_curated from curated)
+   and (select active_curated from curated) > 0) as is_complete
+from public.tenants p
+left join resolved r on r.tenant_id = p.id;
+
+-- ============================================================================
+-- 18e. RPC FUNCTIONS  (migrations 007 + 008; service_role only)
+-- ============================================================================
+-- atomic durable-queue claim (FOR UPDATE SKIP LOCKED) + stuck-job reclaim
+create or replace function public.claim_next_job(
+  p_worker_id text,
+  p_job_types text[]
+)
+returns setof public.jobs
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  j public.jobs;
+begin
+  select * into j
+  from public.jobs
+  where job_type = any(p_job_types)
+    and (
+      (status = 'queued'  and scheduled_at <= now())
+      or
+      (status = 'running' and locked_at is not null
+        and locked_at < now() - make_interval(secs => visibility_timeout_seconds))
+    )
+  order by priority asc, scheduled_at asc
+  for update skip locked
+  limit 1;
+
+  if not found then
+    return;
+  end if;
+
+  if j.status = 'running' then
+    if (j.retry_count + 1) > j.max_retries then
+      update public.jobs
+        set status = 'failed',
+            error = coalesce(error,'') || ' [reclaimed: exceeded max_retries]',
+            finished_at = now(), locked_by = null, locked_at = null
+      where id = j.id;
+      return;
+    end if;
+    update public.jobs
+      set status = 'running', locked_at = now(), locked_by = p_worker_id,
+          retry_count = retry_count + 1
+    where id = j.id
+    returning * into j;
+    return next j;
+    return;
+  end if;
+
+  update public.jobs
+    set status = 'running', locked_at = now(), locked_by = p_worker_id,
+        started_at = coalesce(started_at, now())
+  where id = j.id
+  returning * into j;
+  return next j;
+end;
+$$;
+
+-- secure read of the tenant's Anthropic key from Vault (PostgREST can't read vault directly)
+create or replace function public.get_tenant_anthropic_key(p_tenant_id uuid)
+returns text
+language sql
+security definer
+set search_path = public, vault
+as $$
+  select ds.decrypted_secret
+  from vault.decrypted_secrets ds
+  where ds.name = (select anthropic_secret_name from public.tenants where id = p_tenant_id)
+  limit 1;
+$$;
+
+revoke execute on function public.claim_next_job(text, text[]) from public;
+grant  execute on function public.claim_next_job(text, text[]) to service_role;
+revoke execute on function public.get_tenant_anthropic_key(uuid) from public;
+grant  execute on function public.get_tenant_anthropic_key(uuid) to service_role;
+
+-- ============================================================================
 -- 19. INDEXES  (FK + lookup helpers; tenant_id present for RLS-filtered scans)
 -- ============================================================================
 create index if not exists idx_service_endpoints_tenant on public.service_endpoints(tenant_id);
@@ -485,6 +749,11 @@ create index if not exists idx_videos_output            on public.videos(output_
 create index if not exists idx_mediagen_video           on public.media_generations(video_id);
 create index if not exists idx_jobs_status              on public.jobs(status, tenant_id);
 create index if not exists idx_jobs_type                on public.jobs(job_type, tenant_id);
+-- engine indexes (migration 013)
+create index if not exists idx_attr_stats_tenant_dim    on public.attribute_stats(tenant_id, dimension);
+create index if not exists idx_tuning_lookup            on public.tuning_suggestions(tenant_id, scope_type, scope_key, dimension, status);
+create index if not exists idx_asset_ratings_tenant     on public.asset_ratings(tenant_id);
+create index if not exists idx_outputs_qc               on public.outputs(qc_status);
 
 -- ============================================================================
 -- 20. ROW LEVEL SECURITY  (enable on all; service/secret key bypasses it)
@@ -496,7 +765,9 @@ begin
     'tenants','tenant_members','service_endpoints','media_assets','products',
     'scenarios','prompt_templates','tiktok_accounts','personas','pipeline_runs',
     'outputs','stage_executions','llm_calls','image_generations','qc_checks',
-    'videos','media_generations','jobs'
+    'videos','media_generations','jobs',
+    'tenant_pipeline_config','asset_ratings','attribute_stats','attribute_priors',
+    'tuning_suggestions','tenant_learning_state'
   ]
   loop
     execute format('alter table public.%I enable row level security;', t);
@@ -510,7 +781,9 @@ begin
   foreach t in array array[
     'service_endpoints','media_assets','products','tiktok_accounts','personas',
     'pipeline_runs','outputs','stage_executions','llm_calls','image_generations',
-    'qc_checks','videos','media_generations','jobs'
+    'qc_checks','videos','media_generations','jobs',
+    'tenant_pipeline_config','asset_ratings','attribute_stats',
+    'tuning_suggestions','tenant_learning_state'
   ]
   loop
     execute format('drop policy if exists %1$I_tenant_rw on public.%1$I;', t);
@@ -535,6 +808,11 @@ create policy members_tenant_select on public.tenant_members
 -- scenarios: GLOBAL read for any authenticated user (writes via service key only).
 drop policy if exists scenarios_read on public.scenarios;
 create policy scenarios_read on public.scenarios
+  for select using (true);
+
+-- attribute_priors: GLOBAL cold-start read for any authenticated user (writes via service key only).
+drop policy if exists attribute_priors_read on public.attribute_priors;
+create policy attribute_priors_read on public.attribute_priors
   for select using (true);
 
 -- prompt_templates: a tenant sees global rows + its own.
