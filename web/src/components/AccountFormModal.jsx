@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Mic, Upload, X } from 'lucide-react';
 import { Modal } from './Modal.jsx';
 import { supabase } from '../lib/supabase.js';
-import { parseJsonText, stringifyJson } from '../lib/jsonField.js';
 import {
     COUNTRY_SUGGESTIONS,
     GENDER_OPTIONS,
@@ -38,9 +37,11 @@ export function AccountFormModal({ open, mode, initial, tenantId, onClose, onSub
                 country: initial.country || '',
                 language: initial.language || '',
             });
-            setIdentityFactors(stringifyJson(initial.identity_factors));
+            const appearanceText = typeof initial.identity_factors === 'string'
+                ? initial.identity_factors : (initial.identity_factors?.appearance || '');
+            setIdentityFactors(appearanceText);
             setVoiceText(initial.voice_reference_text || '');
-            setShowAdvanced(Boolean(initial.identity_factors || initial.voice_reference_text));
+            setShowAdvanced(Boolean(appearanceText || initial.voice_reference_text));
         } else {
             setForm(EMPTY);
             setIdentityFactors('');
@@ -87,14 +88,12 @@ export function AccountFormModal({ open, mode, initial, tenantId, onClose, onSub
         if (missing) { setError(`Please fill in the ${missing[0].replace('_', ' ')} field.`); return; }
         if (base.age < 13 || base.age > 120) { setError('Age must be between 13 and 120.'); return; }
 
-        const idf = parseJsonText(identityFactors, {});
-        if (!idf.ok) { setError(`Identity factors is not valid JSON: ${idf.error}`); return; }
-
         setSubmitting(true);
         try {
+            const appearance = identityFactors.trim();
             const payload = {
                 ...base,
-                identity_factors: idf.value,
+                identity_factors: appearance ? { appearance } : {},
                 voice_reference_text: voiceText.trim() || null,
             };
             if (voiceFile) payload.voice_reference_asset_id = await uploadVoice();
@@ -181,9 +180,9 @@ export function AccountFormModal({ open, mode, initial, tenantId, onClose, onSub
                     {showAdvanced && (
                         <>
                             <label className="field">
-                                <span className="field-label">Identity / appearance factors <span className="field-opt">(JSON)</span></span>
+                                <span className="field-label">Appearance / body type <span className="field-opt">(optional, plain English)</span></span>
                                 <textarea className="field-textarea" rows={3}
-                                    placeholder='{ "ethnicity": "...", "hair": "...", "build": "..." }'
+                                    placeholder="Describe the look in plain English, e.g. 'heavier / fat build, round face, short curly hair, warm tan skin'. Leave blank to auto-generate from gender, age and country."
                                     value={identityFactors} onChange={e => setIdentityFactors(e.target.value)} />
                             </label>
                             <label className="field">

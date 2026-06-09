@@ -42,8 +42,14 @@ expression) — nothing more.
 - Apparent age tracks the account's age but NEVER reads below 21 (platform
   compliance hard floor — never depict a minor). If the account age is under 21,
   render apparent age 21+.
-- Body: healthy, natural proportions. Never emaciated, never exaggerated. This
-  is a compliance requirement, not a style choice.
+- Body: believable, natural proportions; never emaciated and never a minor
+  (compliance). Body type itself is FREE to vary — lean, average, soft, stocky,
+  heavier / plus-size — pick what fits the person.
+- If the input includes an `appearance_request`, treat it as an AUTHORITATIVE
+  override for body type / build / face shape (e.g. "heavier / fat build, round
+  face"): render a real, believable person of that build (still 21+, not
+  cartoonish). Reflect it in `body_type`, `body_proportions`, `face.shape` and
+  the `prompt_descriptors`, so the locked identity carries the requested build.
 
 ## PORTRAIT PROMPT RULES (the reference headshot — the face that gets locked)
 - A single FRONT-FACING head-and-shoulders portrait. Face clearly visible,
@@ -75,7 +81,7 @@ expression) — nothing more.
     "skin_tone": "<e.g. light, medium, deep_tan, deep>",
     "skin_undertone": "<warm|cool|neutral>",
     "skin_quality": ["real skin texture with visible pores", "<...>", "<...>"],
-    "body_type": "<e.g. lean, toned_athletic, average, soft_natural>",
+    "body_type": "<e.g. lean, toned_athletic, average, soft_natural, stocky, heavier/plus-size>",
     "body_proportions": ["<...>", "<...>"],
     "height_impression": "<short|average|tall>"
   },
@@ -105,7 +111,7 @@ expression) — nothing more.
   "anti_features": {
     "hair": ["<colours/cuts to avoid for consistency>"],
     "face": ["<drift to avoid, e.g. wrong eye colour>"],
-    "body": ["overly thin or emaciated framing", "exaggerated proportions"],
+    "body": ["overly thin or emaciated framing", "cartoonishly exaggerated proportions"],
     "skin": ["airbrushed plastic finish", "filter-stylized smoothing"]
   },
   "portrait_prompt": "<the 60-110 word front-facing reference headshot prompt per the rules above>",

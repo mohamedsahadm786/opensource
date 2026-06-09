@@ -90,23 +90,43 @@ TASK_BLOCK = "\n".join([
     "  - portrait_prompt: a 60-110 word FRONT-FACING neutral reference headshot,",
     "    plain background, neutral closed-mouth expression, NO product/props/text,",
     "    with the photoreal open/close anchors. Gender-correct pronoun.",
-    "  - body proportions healthy and natural — never emaciated, never exaggerated.",
+    "  - body proportions believable and natural — never emaciated, never a minor.",
+    "    Body type itself is FREE (lean | average | soft | stocky | heavier/plus-size).",
+    "    If 'appearance_request' is provided below, treat it as an AUTHORITATIVE",
+    "    override for body type / build / face shape (e.g. heavier/fat build, round",
+    "    face) — render a REAL believable person of that build (21+, not cartoonish),",
+    "    and carry it into body_type, body_proportions, face.shape and the descriptors.",
     "",
     "Output JSON only. No preamble. No markdown fences.",
 ])
 
 
+def _appearance_note(account: dict) -> str:
+    """Optional plain-English appearance/build request from the web account form
+    (tiktok_accounts.identity_factors). Empty -> no request (default behaviour)."""
+    idf = account.get("identity_factors")
+    if isinstance(idf, dict):
+        return (idf.get("appearance") or "").strip()
+    if isinstance(idf, str):
+        return idf.strip()
+    return ""
+
+
 def build_user_message(account: dict) -> str:
+    ident = {
+        "tiktok_id": account.get("tiktok_id"),
+        "name": account.get("name"),
+        "gender": account.get("gender"),
+        "country": account.get("country"),
+        "age": account.get("age"),
+        "language": account.get("language"),
+    }
+    note = _appearance_note(account)
+    if note:
+        ident["appearance_request"] = note   # authoritative appearance/build override
     return "\n".join([
         "=== ACCOUNT IDENTITY FACTORS (generate the persona for THIS person) ===",
-        json.dumps({
-            "tiktok_id": account.get("tiktok_id"),
-            "name": account.get("name"),
-            "gender": account.get("gender"),
-            "country": account.get("country"),
-            "age": account.get("age"),
-            "language": account.get("language"),
-        }, indent=2, ensure_ascii=False),
+        json.dumps(ident, indent=2, ensure_ascii=False),
         "",
         TASK_BLOCK,
     ])
