@@ -110,6 +110,34 @@ Deno.serve(async (req) => {
       return json({ ok: true });
     }
 
+    if (action === 'impersonate') {
+      // Mint a real session for the tenant's owner so the super-admin sees the
+      // exact tenant workspace (RLS passes because the browser gets a JWT that
+      // carries this tenant_id). Returns a magic-link token the client verifies.
+      const { tenant_id } = body as { tenant_id?: string };
+      if (!tenant_id) return json({ ok: false, error: 'bad_request' }, 400);
+
+      let { data: m } = await admin.from('tenant_members')
+        .select('user_id').eq('tenant_id', tenant_id).eq('role', 'owner').limit(1).maybeSingle();
+      if (!m) {
+        const any = await admin.from('tenant_members')
+          .select('user_id').eq('tenant_id', tenant_id).limit(1).maybeSingle();
+        m = any.data;
+      }
+      if (!m?.user_id) return json({ ok: false, error: 'no_member_for_tenant' }, 400);
+
+      const { data: u, error: uErr } = await admin.auth.admin.getUserById(m.user_id as string);
+      const email = u?.user?.email;
+      if (uErr || !email) return json({ ok: false, error: 'no_user_email' }, 400);
+
+      const { data: link, error: lErr } = await admin.auth.admin.generateLink({ type: 'magiclink', email });
+      if (lErr) return json({ ok: false, error: lErr.message }, 500);
+      const token_hash = (link as { properties?: { hashed_token?: string } })?.properties?.hashed_token;
+      if (!token_hash) return json({ ok: false, error: 'no_token' }, 500);
+
+      return json({ ok: true, email, token_hash });
+    }
+
     if (action === 'list_events') {
       const limit = Number((body as { limit?: number }).limit) || 100;
       const { data, error } = await admin

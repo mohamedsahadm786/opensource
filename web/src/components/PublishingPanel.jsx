@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ArrowLeft, ChevronLeft, ChevronRight, ClipboardCheck, Columns2, Download, ImageOff,
+    ArrowLeft, Bug, ChevronLeft, ChevronRight, ClipboardCheck, Columns2, Download, ImageOff,
     Play, RefreshCw, Search, X,
 } from 'lucide-react';
 import { usePublishingForAccount } from '../hooks/usePublishing.js';
@@ -8,6 +8,7 @@ import { downloadAsset } from '../lib/assets.js';
 import { formatDate, genderClass, genderLabel } from '../lib/utils.js';
 import { Modal } from './Modal.jsx';
 import { RatingWorkspace } from './RatingWorkspace.jsx';
+import { DebugModal } from './DebugModal.jsx';
 
 export function PublishingPanel({ accounts, status, error, search, onReload, rater }) {
     const [selected, setSelected] = useState(null);
@@ -108,6 +109,7 @@ function PublishingDetail({ account, onBack, rater }) {
     const { rows, status, error, reload, mirrorVideo, mirrorImage } = usePublishingForAccount(account.id, account.tenant_id);
     const [lightbox, setLightbox] = useState(null); // index into rows, or null
     const [ratingRow, setRatingRow] = useState(null);
+    const [debug, setDebug] = useState(null); // { row, mode: 'image' | 'video' } | null
 
     const openAt = useCallback((i) => setLightbox(i), []);
     const close = useCallback(() => setLightbox(null), []);
@@ -115,6 +117,8 @@ function PublishingDetail({ account, onBack, rater }) {
     // lightbox's autoplaying <video> keeps playing behind it and you get two
     // videos (and two audio tracks) playing at once.
     const openRating = useCallback((r) => { setLightbox(null); setRatingRow(r); }, []);
+    const openImageDebug = useCallback((r) => { setLightbox(null); setDebug({ row: r, mode: 'image' }); }, []);
+    const openVideoDebug = useCallback((r) => { setLightbox(null); setDebug({ row: r, mode: 'video' }); }, []);
 
     return (
         <section className="panel">
@@ -181,6 +185,8 @@ function PublishingDetail({ account, onBack, rater }) {
                     onMirror={mirrorVideo}
                     onMirrorImage={mirrorImage}
                     onRate={openRating}
+                    onImageDebug={openImageDebug}
+                    onVideoDebug={openVideoDebug}
                 />
             )}
 
@@ -192,6 +198,10 @@ function PublishingDetail({ account, onBack, rater }) {
                     onMirrorImage={mirrorImage}
                     onClose={() => setRatingRow(null)}
                 />
+            )}
+
+            {debug && (
+                <DebugModal open row={debug.row} mode={debug.mode} onClose={() => setDebug(null)} />
             )}
         </section>
     );
@@ -266,7 +276,7 @@ function Thumb({ row, onMirrorImage, alt }) {
 // Fullscreen player. Click a card → play its video inline (Drive /preview
 // iframe), or view the image full-size when there's no video. Arrow keys and
 // the on-screen chevrons step through the gallery.
-function Lightbox({ rows, index, onIndex, onClose, onMirror, onMirrorImage, onRate }) {
+function Lightbox({ rows, index, onIndex, onClose, onMirror, onMirrorImage, onRate, onImageDebug, onVideoDebug }) {
     const row = rows[index];
     const hasVideo = Boolean(row.video && (row.video.id || row.video.drive_file_id || row.video.drive_url));
     const [compare, setCompare] = useState(false);
@@ -337,6 +347,24 @@ function Lightbox({ rows, index, onIndex, onClose, onMirror, onMirrorImage, onRa
                         >
                             <ClipboardCheck /><span>Rate</span>
                         </button>
+                        <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => onImageDebug?.(row)}
+                            title="Show the prompts used at each image stage"
+                        >
+                            <Bug /><span>Image debug</span>
+                        </button>
+                        {hasVideo && (
+                            <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => onVideoDebug?.(row)}
+                                title="Show the video motion prompts + dialogue"
+                            >
+                                <Bug /><span>Video debug</span>
+                            </button>
+                        )}
                         {hasVideo && (
                             <button
                                 type="button"

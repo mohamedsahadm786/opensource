@@ -1,33 +1,56 @@
 import { useEffect, useState } from 'react';
-import { Clapperboard, Clock, Cpu, Hash, Sliders, Target, X } from 'lucide-react';
+import { Clapperboard, Clock, Cpu, Hash, RotateCcw, Sliders, Target, X } from 'lucide-react';
 import { Modal } from './Modal.jsx';
+import { supabase } from '../lib/supabase.js';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { CREATION_MODE_OPTIONS, VIDEO_MODE_OPTIONS } from '../lib/constants.js';
 
-// Per-tenant run controls -> tenant_pipeline_config. The orchestrator reads this.
-export function RunConfigModal({ open, config, accounts = [], onClose, onSave }) {
+// Per-tenant run controls -> tenant_pipeline_config, plus the QC retry count which
+// lives on the product (v2). Run stays disabled until the config is valid.
+export function RunConfigModal({ open, config, accounts = [], tenantId, onClose, onSave }) {
     const toast = useToast();
     const [form, setForm] = useState(config);
+    const [qcRetries, setQcRetries] = useState(3);
     const [error, setError] = useState(null);
     const [saving, setSaving] = useState(false);
     const [showAdvanced, setShowAdvanced] = useState(false);
 
-    useEffect(() => { if (open) { setForm(config); setError(null); } }, [open, config]);
+    useEffect(() => {
+        if (!open) return;
+        setForm({ ...config, target_account_ids: Array.isArray(config.target_account_ids) ? config.target_account_ids : [] });
+        setError(null);
+        // load the product's QC retry count
+        if (tenantId) {
+            supabase.from('products').select('qc_max_retries').eq('tenant_id', tenantId).maybeSingle()
+                .then(({ data }) => setQcRetries(data?.qc_max_retries ?? 3));
+        }
+    }, [open, config, tenantId]);
 
     const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-    const isSilentfirst = form.video_mode === 'silentfirst';
+    const toggleAccount = (id) => setForm((f) => {
+        const cur = Array.isArray(f.target_account_ids) ? f.target_account_ids : [];
+        return { ...f, target_account_ids: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] };
+    });
 
     async function handleSubmit(e) {
         e.preventDefault();
         setError(null);
         if (Number(form.num_videos_per_account) < 1 || !form.num_videos_per_account)
             return setError('Set how many videos per account (at least 1).');
-        if (form.creation_mode === 'specific' && !form.target_account_id)
-            return setError('Choose the specific account to run.');
+        if (Number(form.video_duration_seconds) < 1 || !form.video_duration_seconds)
+            return setError('Set the video duration in seconds.');
+        if (form.creation_mode === 'specific' && (form.target_account_ids || []).length === 0)
+            return setError('Pick at least one account to run.');
 
         setSaving(true);
         try {
             await onSave(form);
+            // QC retry count lives on the product.
+            if (tenantId) {
+                await supabase.from('products')
+                    .update({ qc_max_retries: Number(qcRetries) || 3, updated_at: new Date().toISOString() })
+                    .eq('tenant_id', tenantId);
+            }
             toast.success('Run settings saved.');
             onClose();
         } catch (err) {
@@ -36,6 +59,8 @@ export function RunConfigModal({ open, config, accounts = [], onClose, onSave })
             setSaving(false);
         }
     }
+
+    const selected = Array.isArray(form.target_account_ids) ? form.target_account_ids : [];
 
     return (
         <Modal open={open} onClose={onClose} labelledBy="run-config-title">
@@ -52,7 +77,7 @@ export function RunConfigModal({ open, config, accounts = [], onClose, onSave })
                     <div className="modal-body">
                         <div className="field-row">
                             <label className="field">
-                                <span className="field-label">Which accounts</span>
+                                <span className="field-label">Production type</span>
                                 <div className="field-input is-select">
                                     <Target />
                                     <select value={form.creation_mode} onChange={(e) => set('creation_mode', e.target.value)}>
@@ -71,15 +96,18 @@ export function RunConfigModal({ open, config, accounts = [], onClose, onSave })
                         </div>
 
                         {form.creation_mode === 'specific' && (
-                            <label className="field">
-                                <span className="field-label">Target account</span>
-                                <div className="field-input is-select">
-                                    <select value={form.target_account_id ?? ''} onChange={(e) => set('target_account_id', e.target.value || null)}>
-                                        <option value="">Select an account…</option>
-                                        {accounts.map((a) => <option key={a.id} value={a.id}>@{a.tiktok_id} · {a.name}</option>)}
-                                    </select>
+                            <div className="field">
+                                <span className="field-label">Accounts to run <span className="field-opt">({selected.length} selected)</span></span>
+                                <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10, padding: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                    {accounts.length === 0 && <p className="ana-empty">No accounts yet — onboard some first.</p>}
+                                    {accounts.map((a) => (
+                                        <label key={a.id} className="toggle-row" style={{ margin: 0 }}>
+                                            <input type="checkbox" checked={selected.includes(a.id)} onChange={() => toggleAccount(a.id)} />
+                                            <span>@{a.tiktok_id} · {a.name}</span>
+                                        </label>
+                                    ))}
                                 </div>
-                            </label>
+                            </div>
                         )}
 
                         <div className="field-row">
@@ -112,11 +140,11 @@ export function RunConfigModal({ open, config, accounts = [], onClose, onSave })
                                 </div>
                             </label>
                             <label className="field">
-                                <span className="field-label">Seed <span className="field-opt">(optional)</span></span>
+                                <span className="field-label">QC retry loop count <span className="field-opt">(on product)</span></span>
                                 <div className="field-input">
-                                    <Cpu />
-                                    <input type="number" step="1" placeholder="random" value={form.seed ?? ''}
-                                        onChange={(e) => set('seed', e.target.value)} />
+                                    <RotateCcw />
+                                    <input type="number" min="0" step="1" value={qcRetries}
+                                        onChange={(e) => setQcRetries(e.target.value)} />
                                 </div>
                             </label>
                         </div>
@@ -135,17 +163,15 @@ export function RunConfigModal({ open, config, accounts = [], onClose, onSave })
                         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowAdvanced((s) => !s)}>
                             <Sliders /><span>{showAdvanced ? 'Hide' : 'Show'} advanced (silent-first knobs)</span>
                         </button>
-
                         {showAdvanced && (
                             <div className="field-row" style={{ flexWrap: 'wrap' }}>
                                 {[
-                                    ['intro_seconds', 'Intro (s)'], ['outro_seconds', 'Outro (s)'],
-                                    ['tail_seconds', 'Tail (s)'], ['lips_expression', 'Lips expression'],
-                                    ['inference_steps', 'Inference steps'], ['punch_in', 'Punch-in'],
-                                    ['threshold', 'Threshold'],
+                                    ['intro_seconds', 'Intro (s)'], ['outro_seconds', 'Outro (s)'], ['tail_seconds', 'Tail (s)'],
+                                    ['lips_expression', 'Lips expression'], ['inference_steps', 'Inference steps'],
+                                    ['punch_in', 'Punch-in'], ['threshold', 'Threshold'], ['seed', 'Seed'],
                                 ].map(([k, label]) => (
                                     <label className="field" key={k} style={{ minWidth: 120, flex: '1 1 30%' }}>
-                                        <span className="field-label">{label}{isSilentfirst ? '' : ''}</span>
+                                        <span className="field-label">{label}</span>
                                         <div className="field-input">
                                             <input type="number" step="any" value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} />
                                         </div>

@@ -48,7 +48,7 @@ export function Dashboard({ theme, onToggleTheme, onLogout, user, impersonated =
     } = useTenant(user);
     const { accounts, status, error, reload, create, update, remove } = useAccounts(tenantId);
     const { running, run, runStartedAt, jobId, clearRun } = usePipelineRun();
-    const { counts, completed, stalled } = useRunProgress(runStartedAt, jobId);
+    const { counts, currentStage, completed, stalled } = useRunProgress(runStartedAt, jobId);
     const { config: runConfig, isComplete: runConfigComplete, save: saveRunConfig } = usePipelineConfig(tenantId);
 
     const tenantLoading = !isAdmin && tenantStatus === 'loading';
@@ -190,6 +190,7 @@ export function Dashboard({ theme, onToggleTheme, onLogout, user, impersonated =
                                 onRun={handleRun}
                                 runStartedAt={runStartedAt}
                                 counts={counts}
+                                currentStage={currentStage}
                                 completed={completed}
                                 stalled={stalled}
                                 onClear={clearRun}
@@ -278,6 +279,7 @@ export function Dashboard({ theme, onToggleTheme, onLogout, user, impersonated =
                 open={runSettingsOpen}
                 config={runConfig}
                 accounts={accounts}
+                tenantId={tenantId}
                 onClose={() => setRunSettingsOpen(false)}
                 onSave={saveRunConfig}
             />

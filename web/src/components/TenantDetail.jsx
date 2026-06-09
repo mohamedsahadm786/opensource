@@ -85,11 +85,10 @@ export function TenantDetail({ tenant, onBack, onImpersonate, onSaved }) {
                 <div className="panel-head">
                     <div>
                         <h2><KeyRound size={18} style={{ verticalAlign: '-3px', marginRight: 6 }} />Configuration</h2>
-                        <p className="panel-sub">Plan and workspace details. Use Edit to change name/email/plan.</p>
+                        <p className="panel-sub">Workspace details. Use Edit to change name/email.</p>
                     </div>
                 </div>
                 <div className="detail-grid">
-                    <BriefField label="Plan" value={tenant.plan} />
                     <BriefField label="URL slug" value={tenant.slug} />
                     <BriefField label="Anthropic key" value={'Managed in Supabase Vault'} />
                     <BriefField label="Brand & script config" value={'Edited by the tenant in their setup'} />

@@ -1,17 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Lock, LogIn, Mail, User, UserPlus } from 'lucide-react';
 import { BrandMark } from './BrandMark.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 
-const EMPTY = { username: '', name: '', email: '', email2: '', password: '' };
+const EMPTY = { username: '', name: '', email: '', email2: '', password: '', password2: '' };
 
-export function LoginScreen({ onLogin, onSignIn, onSignUp, theme, onToggleTheme }) {
-    const [mode, setMode] = useState('admin'); // 'admin' | 'signin' | 'signup'
+export function LoginScreen({ onLogin, onSignIn, onSignUp, onForgotPassword, onUpdatePassword, recovery = false, theme, onToggleTheme }) {
+    const [mode, setMode] = useState('admin'); // 'admin' | 'signin' | 'signup' | 'forgot' | 'reset'
     const [form, setForm] = useState(EMPTY);
     const [showPass, setShowPass] = useState(false);
     const [error, setError] = useState(null);
     const [note, setNote] = useState(null);
     const [submitting, setSubmitting] = useState(false);
+
+    // Arriving via a password-reset link → jump straight to the "set new password" form.
+    useEffect(() => { if (recovery) setMode('reset'); }, [recovery]);
 
     function update(key, value) {
         setForm(prev => ({ ...prev, [key]: value }));
@@ -38,6 +41,11 @@ export function LoginScreen({ onLogin, onSignIn, onSignUp, theme, onToggleTheme 
             if (form.password.length < 6)   return setError('Password must be at least 6 characters.');
         } else if (mode === 'signin') {
             if (!form.email.trim() || !form.password) return setError('Enter your email and password.');
+        } else if (mode === 'forgot') {
+            if (!form.email.trim())         return setError('Please enter your email.');
+        } else if (mode === 'reset') {
+            if (form.password.length < 6)   return setError('Password must be at least 6 characters.');
+            if (form.password !== form.password2) return setError('The two passwords don’t match.');
         }
 
         setSubmitting(true);
@@ -48,6 +56,14 @@ export function LoginScreen({ onLogin, onSignIn, onSignUp, theme, onToggleTheme 
             } else if (mode === 'signin') {
                 const r = await onSignIn({ email: form.email.trim(), password: form.password });
                 if (!r.ok) { setError(r.error); setForm(f => ({ ...f, password: '' })); }
+            } else if (mode === 'forgot') {
+                const r = await onForgotPassword?.(form.email.trim());
+                if (r?.ok) setNote('If an account exists for that email, a password-reset link is on its way. Check your inbox.');
+                else setError(r?.error || 'Could not send the reset email.');
+            } else if (mode === 'reset') {
+                const r = await onUpdatePassword?.(form.password);
+                if (r?.ok) setNote('Password updated — signing you in…');
+                else setError(r?.error || 'Could not update your password.');
             } else {
                 const r = await onSignUp({
                     name: form.name.trim(),
@@ -69,16 +85,23 @@ export function LoginScreen({ onLogin, onSignIn, onSignUp, theme, onToggleTheme 
     }
 
     const copy = {
-        admin:  { h: 'Welcome back',       p: 'Sign in to manage TikTok publishing accounts.' },
-        signin: { h: 'Member sign in',     p: 'Use the email and password you signed up with.' },
+        admin:  { h: 'Welcome back',        p: 'Sign in to manage TikTok publishing accounts.' },
+        signin: { h: 'Member sign in',      p: 'Use the email and password you signed up with.' },
         signup: { h: 'Create your account', p: 'Join the workspace to get started.' },
+        forgot: { h: 'Reset your password', p: 'Enter your email and we’ll send you a reset link.' },
+        reset:  { h: 'Set a new password',  p: 'Choose a new password for your account.' },
     }[mode];
 
     const submitLabel = {
-        admin:  submitting ? 'Signing in…'  : 'Sign in',
-        signin: submitting ? 'Signing in…'  : 'Sign in',
-        signup: submitting ? 'Creating…'    : 'Sign up',
+        admin:  submitting ? 'Signing in…' : 'Sign in',
+        signin: submitting ? 'Signing in…' : 'Sign in',
+        signup: submitting ? 'Creating…'   : 'Sign up',
+        forgot: submitting ? 'Sending…'    : 'Send reset link',
+        reset:  submitting ? 'Updating…'    : 'Update password',
     }[mode];
+
+    const showEmail = mode === 'signin' || mode === 'signup' || mode === 'forgot';
+    const showPassword = mode !== 'forgot';
 
     return (
         <section className="auth-shell">
@@ -140,7 +163,7 @@ export function LoginScreen({ onLogin, onSignIn, onSignUp, theme, onToggleTheme 
                         </label>
                     )}
 
-                    {(mode === 'signin' || mode === 'signup') && (
+                    {showEmail && (
                         <label className="field">
                             <span className="field-label">Email</span>
                             <div className="field-input">
@@ -174,28 +197,58 @@ export function LoginScreen({ onLogin, onSignIn, onSignUp, theme, onToggleTheme 
                         </label>
                     )}
 
-                    <label className="field">
-                        <span className="field-label">Password</span>
-                        <div className="field-input">
-                            <Lock />
-                            <input
-                                type={showPass ? 'text' : 'password'}
-                                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                                placeholder="••••••••"
-                                value={form.password}
-                                onChange={e => update('password', e.target.value)}
-                                required
-                            />
-                            <button
-                                type="button"
-                                className="reveal"
-                                aria-label={showPass ? 'Hide password' : 'Show password'}
-                                onClick={() => setShowPass(s => !s)}
-                            >
-                                {showPass ? <EyeOff /> : <Eye />}
-                            </button>
-                        </div>
-                    </label>
+                    {showPassword && (
+                        <label className="field">
+                            <span className="field-label">{mode === 'reset' ? 'New password' : 'Password'}</span>
+                            <div className="field-input">
+                                <Lock />
+                                <input
+                                    type={showPass ? 'text' : 'password'}
+                                    autoComplete={(mode === 'signup' || mode === 'reset') ? 'new-password' : 'current-password'}
+                                    placeholder="••••••••"
+                                    value={form.password}
+                                    onChange={e => update('password', e.target.value)}
+                                    required
+                                />
+                                <button
+                                    type="button"
+                                    className="reveal"
+                                    aria-label={showPass ? 'Hide password' : 'Show password'}
+                                    onClick={() => setShowPass(s => !s)}
+                                >
+                                    {showPass ? <EyeOff /> : <Eye />}
+                                </button>
+                            </div>
+                        </label>
+                    )}
+
+                    {mode === 'reset' && (
+                        <label className="field">
+                            <span className="field-label">Confirm new password</span>
+                            <div className="field-input">
+                                <Lock />
+                                <input
+                                    type={showPass ? 'text' : 'password'}
+                                    autoComplete="new-password"
+                                    placeholder="••••••••"
+                                    value={form.password2}
+                                    onChange={e => update('password2', e.target.value)}
+                                    required
+                                />
+                            </div>
+                        </label>
+                    )}
+
+                    {mode === 'signin' && (
+                        <button
+                            type="button"
+                            className="auth-link"
+                            style={{ alignSelf: 'flex-end', marginTop: -2 }}
+                            onClick={() => switchMode('forgot')}
+                        >
+                            Forgot password?
+                        </button>
+                    )}
 
                     {note && <div className="auth-note">{note}</div>}
                     {error && <div className="auth-error">{error}</div>}
@@ -245,6 +298,17 @@ export function LoginScreen({ onLogin, onSignIn, onSignUp, theme, onToggleTheme 
                         <button type="button" className="auth-back" onClick={() => switchMode('admin')}>
                             <ArrowLeft /><span>Admin login</span>
                         </button>
+                    </div>
+                )}
+
+                {mode === 'forgot' && (
+                    <div className="auth-switch">
+                        <span className="auth-switch-label">
+                            Remembered it?{' '}
+                            <button type="button" className="auth-link" onClick={() => switchMode('signin')}>
+                                Back to sign in
+                            </button>
+                        </span>
                     </div>
                 )}
 

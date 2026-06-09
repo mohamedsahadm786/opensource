@@ -210,8 +210,13 @@ function computeMetrics(accounts, personas, outputs, videos) {
     const totalImages   = outputs.length;
     const totalVideos   = videos.length;
 
-    const passedOutputs  = outputs.filter(o => o.qc_status === 'pass');
-    const skippedOutputs = outputs.filter(o => o.qc_status === 'skipped');
+    // QC outcomes in this pipeline: 'passed' (QC ok), 'exhausted' (kept after
+    // retries ran out), 'skipped' (QC disabled), 'fail'/'failed'. ('pass' kept for
+    // back-compat.) Anything not passed counts as a non-pass / skip.
+    const PASSED = new Set(['passed', 'pass']);
+    const NOT_PASSED = new Set(['exhausted', 'skipped', 'fail', 'failed']);
+    const passedOutputs  = outputs.filter(o => PASSED.has(o.qc_status));
+    const skippedOutputs = outputs.filter(o => NOT_PASSED.has(o.qc_status));
     const totalPassed    = passedOutputs.length;
     const totalSkipped   = skippedOutputs.length;
 

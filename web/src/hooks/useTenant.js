@@ -47,6 +47,9 @@ export function useTenant(user) {
             ...set('brand_config', payload.brand_config),
             ...set('script_company_info', payload.script_company_info),
             ...set('script_directives', payload.script_directives),
+            // v2: raw plain-English briefs (Claude derives the JSON above via convert-briefs)
+            ...(payload.company_brief_text !== undefined ? { company_brief_text: payload.company_brief_text?.trim() || null } : {}),
+            ...(payload.script_brief_text !== undefined ? { script_brief_text: payload.script_brief_text?.trim() || null } : {}),
             ...set('gpu_provider', payload.gpu_provider),
             ...(payload.gpu_host !== undefined ? { gpu_host: payload.gpu_host?.trim() || null } : {}),
             ...set('gpu_url_template', payload.gpu_url_template),

@@ -5,7 +5,7 @@
 -- merged in (002 gpu config, 005 job-queue fields, 007 claim_next_job, 008 vault
 -- RPC, 010 drop do_dont + products qc_brief, 011 voice refs + tenant_pipeline_config,
 -- 012 script_company_info/script_directives/product_info, 013 engine tables + view,
--- 015 exploration-gate view, 016 tuning fields). Run top-to-bottom ONCE on a NEW,
+-- 015 exploration-gate view, 016 tuning fields, 017 raw briefs, 018 specific-account ids). Run top-to-bottom ONCE on a NEW,
 -- EMPTY Supabase project (Pro). Safe to re-run (IF NOT EXISTS / drop-if-exists).
 -- Structure only — tenant DATA seeds (accounts, scenarios, brand/product content,
 -- config + learning-state rows) live in their own migration files, not here.
@@ -74,6 +74,9 @@ create table if not exists public.tenants (
   -- script-generation inputs (migration 012): per-tenant company/brand knowledge + directives
   script_company_info   jsonb,                               -- system_identity, brand_personality, marketing_language_engine, ...
   script_directives     jsonb,                               -- dialogue_generation_rules + ai_generation_priorities
+  -- raw plain-English briefs from the signup form (migration 017); Claude converts these into the jsonb above
+  company_brief_text    text,
+  script_brief_text     text,
   -- GPU connection (the part that changes on RunPod restart lives HERE, once):
   gpu_provider          text not null default 'runpod',      -- runpod | own_gpu
   gpu_host              text,                                 -- RunPod pod-id, or your server host/IP (the CHANGING value)
@@ -169,6 +172,7 @@ create table if not exists public.products (
   qc_max_retries        int not null default 3,              -- total attempts = 1 + qc_max_retries
   -- product knowledge for video script generation (migration 012)
   product_info          jsonb,
+  product_brief_text    text,                                -- raw plain-English product brief (migration 017)
   status             text not null default 'active',
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now(),
@@ -493,7 +497,8 @@ create index if not exists idx_jobs_queue
 create table if not exists public.tenant_pipeline_config (
   tenant_id              uuid primary key references public.tenants(id) on delete cascade,
   creation_mode          text not null default 'all',        -- 'all' | 'new_only' | 'specific'
-  target_account_id      uuid references public.tiktok_accounts(id) on delete set null,
+  target_account_id      uuid references public.tiktok_accounts(id) on delete set null,  -- single (legacy)
+  target_account_ids     jsonb not null default '[]'::jsonb,  -- multiple specific accounts (migration 018)
   num_videos_per_account int  not null default 1,            -- n videos = n scenarios = n images
   video_mode             text not null default 'multishot',  -- 'multishot' | 'silentfirst'
   video_duration_seconds int  not null default 10,
@@ -799,6 +804,15 @@ end$$;
 drop policy if exists tenants_member_select on public.tenants;
 create policy tenants_member_select on public.tenants
   for select using (id = public.current_tenant_id());
+
+-- tenants: a member may UPDATE their own tenant row (gpu_host, briefs, settings.onboarded).
+-- The browser (anon key) needs this for the web setup page; Edge Functions/orchestrator use the
+-- service role and bypass RLS. NOTE: this allows updating ANY column on the member's own row;
+-- for production, restrict to a column allow-list via a SECURITY DEFINER RPC.
+drop policy if exists tenants_member_update on public.tenants;
+create policy tenants_member_update on public.tenants
+  for update using (id = public.current_tenant_id())
+  with check (id = public.current_tenant_id());
 
 -- tenant_members: a user sees membership rows for their tenant.
 drop policy if exists members_tenant_select on public.tenant_members;

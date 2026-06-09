@@ -56,7 +56,11 @@ export function useProduct(tenantId) {
         return asset.id;
     }, [tenantId]);
 
-    // Upsert the product (+ optional new photo). mask_prompt is required.
+    // Upsert the product's RAW inputs (+ optional new photo). The structured
+    // name / product_info / packaging are derived afterwards by convert-briefs,
+    // so we never overwrite them here: product_key & name are preserved (or get
+    // a placeholder on first save to satisfy NOT NULL), and product_info /
+    // packaging are simply omitted from the payload (left untouched on update).
     const save = useCallback(async (payload, photoFile) => {
         if (!tenantId) throw new Error('No tenant context.');
         let referenceAssetId;
@@ -64,19 +68,12 @@ export function useProduct(tenantId) {
 
         const row = {
             tenant_id: tenantId,
-            product_key: payload.product_key?.trim() || null,
-            name: payload.name?.trim() || null,
-            peptide_compound: payload.peptide_compound?.trim() || null,
-            dose: payload.dose?.trim() || null,
-            category: payload.category?.trim() || null,
-            packaging: payload.packaging ?? {},
-            key_benefits: payload.key_benefits ?? [],
-            target_audience: payload.target_audience ?? {},
-            do_not_claim: payload.do_not_claim ?? [],
+            product_key: product?.product_key || 'product',
+            name: product?.name || 'Product',   // placeholder; convert-briefs sets the real name
             mask_prompt: payload.mask_prompt?.trim()
                 || 'white product box package, white rectangular box',
             qc_max_retries: payload.qc_max_retries == null ? 3 : Number(payload.qc_max_retries),
-            product_info: payload.product_info ?? {},
+            product_brief_text: payload.product_brief_text?.trim() || null,
             ...(referenceAssetId ? { reference_asset_id: referenceAssetId } : {}),
             updated_at: new Date().toISOString(),
         };
@@ -86,7 +83,7 @@ export function useProduct(tenantId) {
         setProduct(data);
         await load(); // refresh signed photo URL
         return data;
-    }, [tenantId, uploadPhoto, load]);
+    }, [tenantId, uploadPhoto, load, product]);
 
     return { product, photoUrl, status, error, reload: load, save };
 }

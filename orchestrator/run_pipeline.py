@@ -109,6 +109,22 @@ def _stage_done(persona_id: str, scenario_uuid: str, col: str) -> bool:
     return bool(rows and rows[0].get(col))
 
 
+# ── live progress marker (the web polls stage_executions to show "what stage now") ─
+_TENANT_ID = None  # set in main(); read by progress()
+
+def progress(stage: str) -> None:
+    """Best-effort: write the current stage so the web's Run pill shows live
+    progress (e.g. 'Compositing the product (Qwen)…'). Never raises — progress
+    reporting must never break the pipeline."""
+    if not _TENANT_ID:
+        return
+    try:
+        sb().table("stage_executions").insert(
+            {"tenant_id": _TENANT_ID, "stage_name": stage, "status": "running"}).execute()
+    except Exception:
+        pass
+
+
 # ── PHASE A: portrait (separate) ────────────────────────────────────────────────
 def do_portrait(account: dict) -> bool:
     sid = account["tiktok_id"]
@@ -116,6 +132,7 @@ def do_portrait(account: dict) -> bool:
     if rows and rows[0].get("appearance_spec"):
         print(f"   [{sid}] portrait exists ✓ (skipping)")
         return False
+    progress("phasea")
     api_key = RP.get_anthropic_key(account["tenant_id"])
     system_md = (RULES_DIR / "phaseA.md").read_text(encoding="utf-8")
     parsed, user_message, meta = RP.build_portrait_prompt(account, system_md, api_key)
@@ -131,6 +148,7 @@ def do_portrait(account: dict) -> bool:
 def do_scene(account, persona, scenario_uuid, scenario_key, scenario_spec, api_key):
     if _stage_done(persona["id"], scenario_uuid, "step1_asset_id"):
         print("   scene     ✓ (already done)"); return
+    progress("step1")
     user_msg = RSC.build_user_message(persona, account.get("gender"), scenario_spec)
     raw, usage = _opus(api_key, (RULES_DIR / "step1.md").read_text(encoding="utf-8"), user_msg)
     parsed = RSC.parse_json(raw)
@@ -190,6 +208,7 @@ def do_product(account, persona, scenario_uuid, scenario_key, scenario_spec, api
         if prev and prev[0].get("qc_status") in ("passed", "exhausted"):
             print("   product   ✓ (already done, QC resolved)"); return
 
+    progress("step2")
     product = get_product_full(account["tenant_id"])
     step1_prompt = RS2.get_step1_prompt(scenario_key)
     base_user_msg = RS2.build_user_message(product, scenario_spec, step1_prompt)
@@ -214,6 +233,7 @@ def do_product(account, persona, scenario_uuid, scenario_key, scenario_spec, api
             print(f"   product   ✓{dtxt}")
             return
 
+        progress("qc")
         output_id, img, mtype = _download_step2(persona["id"], scenario_uuid)
         decision = QC.validate(img, mtype, product, api_key, scenario_key)
         if output_id:
@@ -234,6 +254,7 @@ def do_product(account, persona, scenario_uuid, scenario_key, scenario_spec, api
 def do_realism(account, persona, scenario_uuid, scenario_key):
     if _stage_done(persona["id"], scenario_uuid, "step3_asset_id"):
         print("   realism   ✓ (already done)"); return
+    progress("step3")
     mask_prompt = RS3.get_mask_prompt(account["tenant_id"])
     job_id = RS3.enqueue_step3({
         "tenant_id": account["tenant_id"], "account_id": account["id"], "persona_id": persona["id"],
@@ -271,6 +292,7 @@ def finished_images_without_video(persona_id: str, limit: int) -> list:
 def do_video(account, persona, output_row, scenario_spec, api_key, sources, controls, rule_book):
     company, product, directives = sources
     scenario_key = output_row.get("scenario_key") or output_row["scenario_id"]
+    progress("script")
     res = SG.generate_script(
         company_info=company, product_info=product, directives=directives,
         persona=account, scenario_key=scenario_key, scenario_spec=scenario_spec,
@@ -280,6 +302,7 @@ def do_video(account, persona, output_row, scenario_spec, api_key, sources, cont
     payload = RV.build_enqueue_payload(account=account, persona=persona, output=output_row,
                                        controls=controls, parsed=res["parsed"])
     payload["attempt"] = 1
+    progress("video")
     job_id = RV.enqueue_video(payload)
     d = _dur(_ok(_poll(job_id, VIDEO_POLL_TIMEOUT), "video"))
     print(f"   video     ✓ ({controls['video_mode']}, {res['stats']['num_shots']} shots)" + (f" ({d:.0f}s)" if d else ""))
@@ -298,10 +321,13 @@ def select_accounts_by_mode(tenant_id: str, cfg: dict) -> list:
     mode = (cfg or {}).get("creation_mode", "all")
     allacc = sb().table("tiktok_accounts").select("*").eq("tenant_id", tenant_id).execute().data or []
     if mode == "specific":
-        tid = (cfg or {}).get("target_account_id")
-        sel = [a for a in allacc if a["id"] == tid]
+        ids = (cfg or {}).get("target_account_ids") or []
+        if not ids and (cfg or {}).get("target_account_id"):
+            ids = [cfg["target_account_id"]]          # back-compat with the single-id column
+        ids = [i for i in ids if i]
+        sel = [a for a in allacc if a["id"] in ids]
         if not sel:
-            raise SystemExit(f"[pipeline] creation_mode=specific but target_account_id {tid!r} not found")
+            raise SystemExit(f"[pipeline] creation_mode=specific but none of {ids!r} matched this tenant's accounts")
         return sel
     if mode == "new_only":
         personas = sb().table("personas").select("tiktok_account_id").execute().data or []
@@ -362,6 +388,9 @@ def main() -> None:
         accounts = resolve_accounts(args)
         tenant_id = accounts[0]["tenant_id"]
         cfg = RV.get_pipeline_config(tenant_id)
+
+    global _TENANT_ID
+    _TENANT_ID = tenant_id
 
     n_scen = args.scenarios if args.scenarios is not None else int((cfg or {}).get("num_videos_per_account") or 1)
     controls = RV.resolve_controls(cfg, _CtlArgs(args))

@@ -1,20 +1,22 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
 
-const POLL_INTERVAL_MS = 20_000;
-const STALL_TIMEOUT_MS = 45 * 60 * 1000;   // no progress at all -> stalled
-const QUIET_COMPLETE_MS = 5 * 60 * 1000;   // progress, then quiet -> assume complete
+const POLL_INTERVAL_MS = 8_000;
+const STALL_TIMEOUT_MS = 30 * 60 * 1000;   // job still 'running' but ZERO activity this long -> likely hung
 
-// Polls progress of a run and resolves its phase:
-//   running   -> rows still appearing (show counts)
-//   completed -> the enqueued job reached 'succeeded' (reliable), OR rows
-//                appeared and then went quiet for QUIET_COMPLETE_MS (heuristic)
-//   stalled   -> the job 'failed', OR no rows at all for STALL_TIMEOUT_MS
+// Polls a run's progress. Completion / failure are driven by the durable JOB the
+// worker updates (jobs.status = 'succeeded' | 'failed') — NOT a heuristic, so the
+// pill no longer falsely flips to "complete" during a long video render.
 //
-// Counts are RLS-scoped to the caller's tenant automatically.
-// Returns: { counts:{personas,outputs,videos}, lastChangeAt, completed, stalled }.
+// While the job runs we also surface the CURRENT stage: run_pipeline writes a
+// stage_executions row at each step (phasea | step1 | step2 | qc | step3 |
+// script | video), and we show the latest one ("Compositing the product…") so the
+// user can see the long render is alive and exactly where it is.
+//
+// Returns: { counts, currentStage, lastChangeAt, completed, stalled }.
 export function useRunProgress(runStartedAt, jobId = null) {
     const [counts, setCounts] = useState({ personas: 0, outputs: 0, videos: 0 });
+    const [currentStage, setCurrentStage] = useState(null);
     const [lastChangeAt, setLastChangeAt] = useState(null);
     const [completed, setCompleted] = useState(false);
     const [stalled, setStalled] = useState(false);
@@ -22,6 +24,7 @@ export function useRunProgress(runStartedAt, jobId = null) {
     useEffect(() => {
         if (!runStartedAt) {
             setCounts({ personas: 0, outputs: 0, videos: 0 });
+            setCurrentStage(null);
             setLastChangeAt(null);
             setCompleted(false);
             setStalled(false);
@@ -36,10 +39,15 @@ export function useRunProgress(runStartedAt, jobId = null) {
         async function poll() {
             if (cancelled) return;
             try {
-                const [pRes, oRes, vRes, jobRes] = await Promise.all([
+                const [pRes, oRes, vRes, stageRes, jobRes] = await Promise.all([
                     supabase.from('personas').select('*', { count: 'exact', head: true }).gt('created_at', startISO),
                     supabase.from('outputs').select('*', { count: 'exact', head: true }).gt('created_at', startISO),
                     supabase.from('videos').select('*', { count: 'exact', head: true }).gt('created_at', startISO),
+                    supabase.from('stage_executions')
+                        .select('stage_name, created_at')
+                        .gt('created_at', startISO)
+                        .order('created_at', { ascending: false })
+                        .limit(1),
                     jobId
                         ? supabase.from('jobs').select('status').eq('id', jobId).maybeSingle()
                         : Promise.resolve({ data: null }),
@@ -47,23 +55,28 @@ export function useRunProgress(runStartedAt, jobId = null) {
                 if (cancelled) return;
 
                 const next = { personas: pRes.count || 0, outputs: oRes.count || 0, videos: vRes.count || 0 };
-                const sig = `${next.personas},${next.outputs},${next.videos}`;
+                const stage = stageRes.data?.[0]?.stage_name || null;
+                // "activity" = counts OR the live stage changing; either keeps the heartbeat alive.
+                const sig = `${next.personas},${next.outputs},${next.videos},${stage || ''}`;
                 if (sig !== lastSig) {
                     lastSig = sig;
                     lastChange = Date.now();
                     setCounts(next);
+                    setCurrentStage(stage);
                     setLastChangeAt(lastChange);
                 }
 
                 const jobStatus = jobRes?.data?.status;
-                const progressed = next.personas + next.outputs + next.videos > 0;
                 const quiet = Date.now() - lastChange;
-                const heuristicDone = progressed && quiet > QUIET_COMPLETE_MS;
 
-                if (jobStatus === 'succeeded' || heuristicDone) {
+                // Completion is authoritative: the worker sets the job to succeeded/failed.
+                if (jobStatus === 'succeeded') {
                     setCompleted(true);
                     setStalled(false);
-                } else if (jobStatus === 'failed' || (!progressed && quiet > STALL_TIMEOUT_MS)) {
+                } else if (jobStatus === 'failed') {
+                    setStalled(true);
+                } else if (quiet > STALL_TIMEOUT_MS) {
+                    // Last-resort safety net: no rows AND no stage change for 30 min -> probably hung.
                     setStalled(true);
                 }
             } catch (err) {
@@ -76,5 +89,5 @@ export function useRunProgress(runStartedAt, jobId = null) {
         return () => { cancelled = true; clearInterval(id); };
     }, [runStartedAt, jobId]);
 
-    return { counts, lastChangeAt, completed, stalled };
+    return { counts, currentStage, lastChangeAt, completed, stalled };
 }

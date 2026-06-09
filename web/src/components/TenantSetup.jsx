@@ -2,64 +2,66 @@ import { useState } from 'react';
 import { Building2, Cpu, KeyRound, Package, Sparkles } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { useProduct } from '../hooks/useProduct.js';
-import { parseJsonText } from '../lib/jsonField.js';
+import { convertBriefs, generateQcBrief } from '../lib/briefs.js';
 import { emptyProductForm, buildProductPayload } from '../lib/productForm.js';
-import { PLAN_OPTIONS } from '../lib/constants.js';
 import { ProductFields } from './ProductFields.jsx';
 
-// First-run setup for a freshly provisioned tenant. Collects everything the
-// pipeline reads: company/brand identity, script knowledge (the jsonb blobs),
-// the Anthropic key (-> Vault), and the ONE product (+ photo). Finishing flips
-// tenants.settings.onboarded = true.
-export function TenantSetup({ user, tenantId, profile, saveTenantConfig, storeAnthropicKey, markOnboarded, onDone }) {
+// v2 first-run setup: 7 plain-English fields. No JSON, no company/slug/plan.
+// On Save we store raw briefs + the Vault key + the product photo, then run the
+// server-side convert-briefs Claude pass to derive the JSON the pipeline reads,
+// then flip onboarded. The Save button is gated until every field is filled.
+export function TenantSetup({ user, tenantId, saveTenantConfig, storeAnthropicKey, markOnboarded, onDone }) {
     const toast = useToast();
     const { save: saveProduct } = useProduct(tenantId);
 
-    const [company, setCompany] = useState({
-        name: profile?.name || user?.name || '',
-        slug: profile?.slug || '',
-        email: profile?.email || user?.email || '',
-        plan: profile?.plan || 'free',
-    });
-    const [brandConfig, setBrandConfig] = useState('');
-    const [scriptCompanyInfo, setScriptCompanyInfo] = useState('');
-    const [scriptDirectives, setScriptDirectives] = useState('');
+    const [gpuHost, setGpuHost] = useState('');
     const [anthropicKey, setAnthropicKey] = useState('');
-
+    const [companyBrief, setCompanyBrief] = useState('');
+    const [scriptBrief, setScriptBrief] = useState('');
     const [product, setProduct] = useState(emptyProductForm);
     const [photoFile, setPhotoFile] = useState(null);
 
     const [saving, setSaving] = useState(false);
-    const setCo = (k) => (e) => setCompany((c) => ({ ...c, [k]: e.target.value }));
+    const [phase, setPhase] = useState('');     // status text while saving
     const setProductField = (k, v) => setProduct((p) => ({ ...p, [k]: v }));
+
+    const canSave =
+        gpuHost.trim() && anthropicKey.trim() && companyBrief.trim() && scriptBrief.trim()
+        && product.product_brief_text.trim() && product.mask_prompt.trim() && photoFile;
 
     async function handleSubmit(e) {
         e.preventDefault();
-        if (!company.name.trim()) { toast.error('Company name is required.'); return; }
-
-        // Parse the brand/script jsonb blobs.
-        const blobs = {};
-        for (const [key, raw] of [
-            ['brand_config', brandConfig],
-            ['script_company_info', scriptCompanyInfo],
-            ['script_directives', scriptDirectives],
-        ]) {
-            const r = parseJsonText(raw, {});
-            if (!r.ok) { toast.error(`"${key}" is not valid JSON: ${r.error}`); return; }
-            blobs[key] = r.value;
-        }
-
+        if (!canSave) { toast.info('Fill in every field (and upload the product photo) to finish setup.'); return; }
         const built = buildProductPayload(product);
         if (!built.ok) { toast.error(built.error); return; }
 
         setSaving(true);
         try {
-            await saveTenantConfig({
-                name: company.name, slug: company.slug, email: company.email, plan: company.plan,
-                ...blobs,
-            });
-            if (anthropicKey.trim()) await storeAnthropicKey(anthropicKey);
+            setPhase('Storing your Anthropic key…');
+            await storeAnthropicKey(anthropicKey);
+
+            setPhase('Saving your briefs…');
+            await saveTenantConfig({ gpu_host: gpuHost, company_brief_text: companyBrief, script_brief_text: scriptBrief });
             await saveProduct(built.payload, photoFile);
+
+            setPhase('Converting your briefs with Claude…');
+            await convertBriefs({
+                product_brief: product.product_brief_text,
+                company_brief: companyBrief,
+                script_brief: scriptBrief,
+            });
+
+            // QC ground-truth brief from the product photo. Best-effort: a failure
+            // here must NOT block onboarding (the pipeline still runs without it,
+            // QC just lacks product-specific ground truth — re-run from Product page).
+            setPhase('Analyzing your product photo…');
+            try {
+                await generateQcBrief();
+            } catch (qcErr) {
+                console.warn('[Alluvi] qc-brief generation failed (non-fatal)', qcErr);
+            }
+
+            setPhase('Finishing…');
             await markOnboarded();
             toast.success('Setup complete — welcome aboard!');
             onDone?.();
@@ -67,6 +69,7 @@ export function TenantSetup({ user, tenantId, profile, saveTenantConfig, storeAn
             console.error('[Alluvi] tenant setup failed', err);
             toast.error(err?.message || 'Could not save your setup.');
             setSaving(false);
+            setPhase('');
         }
     }
 
@@ -76,75 +79,29 @@ export function TenantSetup({ user, tenantId, profile, saveTenantConfig, storeAn
                 <div>
                     <h2>Let’s set up your workspace</h2>
                     <p className="panel-sub">
-                        Welcome{user?.name ? `, ${user.name}` : ''} — this configures the generation pipeline for your brand.
+                        Welcome{user?.name ? `, ${user.name}` : ''} — write everything in plain English. We convert it into the
+                        pipeline’s structured data for you (no JSON). Every field is required.
                     </p>
                 </div>
             </header>
 
             <form className="setup-form" onSubmit={handleSubmit}>
-                {/* Company / brand */}
+                {/* GPU + key */}
                 <div className="setup-card">
                     <div className="setup-card-head">
-                        <Building2 />
-                        <div><h3>Company &amp; brand</h3><p>Your company identity and brand creative config.</p></div>
-                    </div>
-                    <div className="field-row">
-                        <label className="field">
-                            <span className="field-label">Company name</span>
-                            <div className="field-input"><input type="text" value={company.name} onChange={setCo('name')} placeholder="Alluvi" /></div>
-                        </label>
-                        <label className="field">
-                            <span className="field-label">URL slug</span>
-                            <div className="field-input"><input type="text" value={company.slug} onChange={setCo('slug')} placeholder="alluvi" /></div>
-                        </label>
-                    </div>
-                    <div className="field-row">
-                        <label className="field">
-                            <span className="field-label">Billing email</span>
-                            <div className="field-input"><input type="email" value={company.email} onChange={setCo('email')} placeholder="you@example.com" /></div>
-                        </label>
-                        <label className="field">
-                            <span className="field-label">Plan</span>
-                            <div className="field-input is-select">
-                                <select value={company.plan} onChange={setCo('plan')}>
-                                    {PLAN_OPTIONS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-                                </select>
-                            </div>
-                        </label>
+                        <Cpu />
+                        <div><h3>Connection</h3><p>The GPU pod-id (from your ops channel) and your Anthropic key.</p></div>
                     </div>
                     <label className="field">
-                        <span className="field-label">Brand config <span className="field-opt">(JSON — voice, vocabulary, visual identity; mirrors brand.yaml)</span></span>
-                        <textarea className="field-textarea" rows={6} value={brandConfig} onChange={(e) => setBrandConfig(e.target.value)}
-                            placeholder='{ "voice": { "archetype": "the wellness-confident insider" }, "vocabulary": { "forbidden_words": ["miracle"] } }' />
-                    </label>
-                </div>
-
-                {/* Script knowledge */}
-                <div className="setup-card">
-                    <div className="setup-card-head">
-                        <Sparkles />
-                        <div><h3>Script generation knowledge</h3><p>What the dialogue/scene generator reads (mirrors alluvi_information.json).</p></div>
-                    </div>
-                    <label className="field">
-                        <span className="field-label">script_company_info <span className="field-opt">(JSON)</span></span>
-                        <textarea className="field-textarea" rows={6} value={scriptCompanyInfo} onChange={(e) => setScriptCompanyInfo(e.target.value)}
-                            placeholder='{ "system_identity": {...}, "brand_personality": {...}, "marketing_language_engine": {...}, "video_generation_preferences": {...}, "scene_generation_system": {...} }' />
+                        <span className="field-label">GPU host (RunPod pod-id)</span>
+                        <div className="field-input">
+                            <Cpu />
+                            <input type="text" placeholder="paste the latest pod-id from your ops channel"
+                                value={gpuHost} onChange={(e) => setGpuHost(e.target.value)} />
+                        </div>
                     </label>
                     <label className="field">
-                        <span className="field-label">script_directives <span className="field-opt">(JSON)</span></span>
-                        <textarea className="field-textarea" rows={5} value={scriptDirectives} onChange={(e) => setScriptDirectives(e.target.value)}
-                            placeholder='{ "dialogue_generation_rules": {...}, "ai_generation_priorities": {...} }' />
-                    </label>
-                </div>
-
-                {/* Anthropic key */}
-                <div className="setup-card">
-                    <div className="setup-card-head">
-                        <KeyRound />
-                        <div><h3>Anthropic API key</h3><p>Stored encrypted in Supabase Vault — never saved in a normal column.</p></div>
-                    </div>
-                    <label className="field">
-                        <span className="field-label">Anthropic Claude API key</span>
+                        <span className="field-label">Anthropic Claude API key <span className="field-opt">(stored in Vault)</span></span>
                         <div className="field-input">
                             <KeyRound />
                             <input type="password" placeholder="sk-ant-…" autoComplete="off" spellCheck="false"
@@ -153,11 +110,37 @@ export function TenantSetup({ user, tenantId, profile, saveTenantConfig, storeAn
                     </label>
                 </div>
 
+                {/* Company brief */}
+                <div className="setup-card">
+                    <div className="setup-card-head">
+                        <Building2 />
+                        <div><h3>Company / brand brief</h3><p>Everything about the brand — voice, positioning, audience, style.</p></div>
+                    </div>
+                    <label className="field">
+                        <span className="field-label">Company brief <span className="field-opt">(plain English)</span></span>
+                        <textarea className="field-textarea" rows={8} value={companyBrief} onChange={(e) => setCompanyBrief(e.target.value)}
+                            placeholder="Describe the brand: who you are, how you sound, your positioning, your audience, the visual/cinematic style, the moods and camera motion you like, the hooks and phrases that work for you…" />
+                    </label>
+                </div>
+
+                {/* Script brief */}
+                <div className="setup-card">
+                    <div className="setup-card-head">
+                        <Sparkles />
+                        <div><h3>Script / dialogue brief</h3><p>How the spoken dialogue should sound — tone, what to say, what to avoid.</p></div>
+                    </div>
+                    <label className="field">
+                        <span className="field-label">Script brief <span className="field-opt">(plain English)</span></span>
+                        <textarea className="field-textarea" rows={6} value={scriptBrief} onChange={(e) => setScriptBrief(e.target.value)}
+                            placeholder="How should the on-camera dialogue feel? Tone and style, things it MUST do, example lines you love, and what it must NEVER say or do (claims to avoid, artifacts to avoid)…" />
+                    </label>
+                </div>
+
                 {/* Product */}
                 <div className="setup-card">
                     <div className="setup-card-head">
                         <Package />
-                        <div><h3>Product</h3><p>One product per workspace. The mask prompt is required.</p></div>
+                        <div><h3>Product</h3><p>One product per workspace. Describe it in plain English; upload the real photo.</p></div>
                     </div>
                     <ProductFields
                         form={product}
@@ -169,7 +152,8 @@ export function TenantSetup({ user, tenantId, profile, saveTenantConfig, storeAn
                 </div>
 
                 <footer className="setup-foot">
-                    <button type="submit" className="btn btn-primary" disabled={saving}>
+                    {saving && phase && <span className="panel-sub" style={{ alignSelf: 'center' }}>{phase}</span>}
+                    <button type="submit" className="btn btn-primary" disabled={saving || !canSave}>
                         <Sparkles />
                         <span>{saving ? 'Setting up…' : 'Finish setup'}</span>
                     </button>

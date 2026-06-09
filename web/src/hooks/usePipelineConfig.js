@@ -6,10 +6,10 @@ import { supabase } from '../lib/supabase.js';
 // Proven defaults already live in the schema; the form just overrides them.
 const EMPTY = {
     creation_mode: 'all',          // 'all' | 'new_only' | 'specific'
-    target_account_id: null,       // required when creation_mode='specific'
-    num_videos_per_account: 1,
+    target_account_ids: [],        // jsonb array of tiktok_accounts.id (when 'specific')
+    num_videos_per_account: '',    // REQUIRED — user must enter it (this gates the Run button)
     video_mode: 'multishot',       // 'multishot' | 'silentfirst'
-    video_duration_seconds: 10,
+    video_duration_seconds: '',    // REQUIRED — user must enter it (this gates the Run button)
     shot_seconds: 5,
     intro_seconds: 2,
     outro_seconds: 2,
@@ -25,8 +25,11 @@ const EMPTY = {
 
 export function isPipelineConfigComplete(c) {
     if (!c) return false;
-    if (Number(c.num_videos_per_account) < 1) return false;
-    if (c.creation_mode === 'specific' && !c.target_account_id) return false;
+    // num_videos_per_account + video_duration_seconds are required (no default),
+    // so the Run button stays disabled until the user fills them in Run settings.
+    if (!c.num_videos_per_account || Number(c.num_videos_per_account) < 1) return false;
+    if (!c.video_duration_seconds || Number(c.video_duration_seconds) < 1) return false;
+    if (c.creation_mode === 'specific' && (!Array.isArray(c.target_account_ids) || c.target_account_ids.length === 0)) return false;
     return Boolean(c.creation_mode) && Boolean(c.video_mode);
 }
 
@@ -60,7 +63,7 @@ export function usePipelineConfig(tenantId) {
         const row = {
             tenant_id: tenantId,
             creation_mode: draft.creation_mode || 'all',
-            target_account_id: draft.creation_mode === 'specific' ? (draft.target_account_id || null) : null,
+            target_account_ids: draft.creation_mode === 'specific' ? (draft.target_account_ids || []) : [],
             num_videos_per_account: numOrNull(draft.num_videos_per_account) ?? 1,
             video_mode: draft.video_mode || 'multishot',
             video_duration_seconds: numOrNull(draft.video_duration_seconds) ?? 10,

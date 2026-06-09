@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { adminInvoke } from '../lib/adminApi.js';
 import { ADMIN_PASS, ADMIN_USER, SESSION_KEY } from '../lib/constants.js';
+
+const IMP_KEY = 'alluvi.impersonating'; // sessionStorage flag while a super-admin views a tenant
 
 // Two ways in:
 //  • Super admin (platform owner): hardcoded ADMIN_USER/ADMIN_PASS, gated by a
@@ -34,6 +37,10 @@ export function useAuth() {
     const [authed, setAuthed] = useState(false);
     const [user, setUser] = useState(null);
     const [ready, setReady] = useState(false);
+    const [recovery, setRecovery] = useState(false); // true while handling a password-reset link
+    const [impersonating, setImpersonating] = useState(() => {
+        try { return JSON.parse(sessionStorage.getItem(IMP_KEY) || 'null'); } catch { return null; }
+    });
     const provisioning = useRef(new Set()); // user ids currently being provisioned
 
     const adminFlag = () => sessionStorage.getItem(SESSION_KEY) === 'ok';
@@ -76,7 +83,10 @@ export function useAuth() {
             setReady(true);
             ensureProvisioned(data.session);
         });
-        const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+        const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+            // Arriving via a password-reset email → let the UI show a "set new
+            // password" form instead of dropping the user into the dashboard.
+            if (event === 'PASSWORD_RECOVERY') setRecovery(true);
             sync(session);
             ensureProvisioned(session);
         });
@@ -121,12 +131,72 @@ export function useAuth() {
         return { ok: true };
     }, [ensureProvisioned]);
 
+    // Send a password-reset email. The link returns to the app's origin and fires
+    // the PASSWORD_RECOVERY event (handled above) so the user can set a new password.
+    const resetPassword = useCallback(async (email) => {
+        const addr = (email || '').trim();
+        if (!addr) return { ok: false, error: 'Enter your email.' };
+        const { error } = await supabase.auth.resetPasswordForEmail(addr, {
+            redirectTo: window.location.origin,
+        });
+        if (error) return { ok: false, error: error.message };
+        return { ok: true };
+    }, []);
+
+    // Set a new password for the active (recovery) session, then clear recovery.
+    const updatePassword = useCallback(async (password) => {
+        const { error } = await supabase.auth.updateUser({ password });
+        if (error) return { ok: false, error: error.message };
+        setRecovery(false);
+        return { ok: true };
+    }, []);
+
+    // Super-admin → enter a tenant's workspace AS that tenant. The service-role
+    // function mints a magic-link token for the tenant owner; we verify it to get
+    // a real member session (so RLS passes and the tenant Dashboard works fully).
+    const impersonate = useCallback(async (tenant) => {
+        try {
+            const data = await adminInvoke('impersonate', { tenant_id: tenant.tenant_id });
+            if (!data?.token_hash) return { ok: false, error: 'Could not start impersonation.' };
+            const info = { tenant_id: tenant.tenant_id, name: tenant.name, email: tenant.email };
+            // mark impersonation + drop the admin flag BEFORE the member session lands
+            try { sessionStorage.setItem(IMP_KEY, JSON.stringify(info)); } catch { /* noop */ }
+            sessionStorage.removeItem(SESSION_KEY);
+            const { error } = await supabase.auth.verifyOtp({ token_hash: data.token_hash, type: 'magiclink' });
+            if (error) {
+                try { sessionStorage.removeItem(IMP_KEY); } catch { /* noop */ }
+                sessionStorage.setItem(SESSION_KEY, 'ok'); // restore super-admin
+                return { ok: false, error: error.message };
+            }
+            setImpersonating(info);
+            return { ok: true };
+        } catch (err) {
+            sessionStorage.setItem(SESSION_KEY, 'ok');
+            return { ok: false, error: err.message || 'Impersonation failed.' };
+        }
+    }, []);
+
+    // Exit impersonation: drop the tenant session and restore the super-admin.
+    const exitImpersonation = useCallback(async () => {
+        try { sessionStorage.removeItem(IMP_KEY); } catch { /* noop */ }
+        sessionStorage.setItem(SESSION_KEY, 'ok'); // become super-admin again
+        setImpersonating(null);
+        await supabase.auth.signOut(); // fires onAuthStateChange(null) -> super_admin
+    }, []);
+
     const logout = useCallback(async () => {
         sessionStorage.removeItem(SESSION_KEY);
+        sessionStorage.removeItem(IMP_KEY);
         await supabase.auth.signOut();
         setAuthed(false);
         setUser(null);
+        setRecovery(false);
+        setImpersonating(null);
     }, []);
 
-    return { authed, ready, user, login, signUp, signIn, logout };
+    return {
+        authed, ready, user, recovery, impersonating,
+        login, signUp, signIn, logout, resetPassword, updatePassword,
+        impersonate, exitImpersonation,
+    };
 }

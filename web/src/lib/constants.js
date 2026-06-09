@@ -54,7 +54,7 @@ export const PLAN_OPTIONS = [
 export const CREATION_MODE_OPTIONS = [
     { value: 'all', label: 'All accounts' },
     { value: 'new_only', label: 'New accounts only (no persona yet)' },
-    { value: 'specific', label: 'A specific account' },
+    { value: 'specific', label: 'Specific accounts' },
 ];
 
 export const VIDEO_MODE_OPTIONS = [

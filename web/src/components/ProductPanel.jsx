@@ -3,6 +3,7 @@ import { Package, RefreshCw, Save } from 'lucide-react';
 import { useProduct } from '../hooks/useProduct.js';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { productFormFromRow, buildProductPayload } from '../lib/productForm.js';
+import { convertBriefs, generateQcBrief } from '../lib/briefs.js';
 import { ProductFields } from './ProductFields.jsx';
 
 // The single product per tenant — view + edit.
@@ -21,11 +22,25 @@ export function ProductPanel({ tenantId }) {
         e.preventDefault();
         const built = buildProductPayload(form);
         if (!built.ok) { toast.error(built.error); return; }
+        const photoChanged = Boolean(photoFile);
         setSaving(true);
         try {
             await save(built.payload, photoFile);
             setPhotoFile(null);
-            toast.success('Product saved.');
+            // Re-derive the structured product JSON (name/product_info/packaging) from the brief.
+            await convertBriefs({ product_brief: built.payload.product_brief_text });
+            // If the product photo was swapped, refresh the QC ground-truth brief
+            // from the new photo. force=true because a brief already exists.
+            // Best-effort: a failure must not fail the product save.
+            if (photoChanged) {
+                try {
+                    await generateQcBrief({ force: true });
+                } catch (qcErr) {
+                    console.warn('[Alluvi] qc-brief refresh failed (non-fatal)', qcErr);
+                }
+            }
+            await reload();
+            toast.success('Product saved and re-analyzed.');
         } catch (err) {
             toast.error(err?.message || 'Could not save the product.');
         } finally {

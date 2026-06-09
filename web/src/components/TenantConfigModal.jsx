@@ -2,12 +2,11 @@ import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { Modal } from './Modal.jsx';
 import { adminInvoke } from '../lib/adminApi.js';
-import { PLAN_OPTIONS } from '../lib/constants.js';
 
 // Super-admin edit control over a tenant's profile. Routes through the
 // service-role admin-data Edge Function (RLS hides other tenants from the anon
 // key). API keys live in Vault and briefings are now jsonb config the tenant
-// edits in their own setup — so the platform owner edits only name/email/plan
+// edits in their own setup — so the platform owner edits only name/email
 // and the onboarded flag here.
 export function TenantConfigModal({ open, tenant, onClose, onSaved }) {
     const [form, setForm] = useState({});
@@ -19,7 +18,6 @@ export function TenantConfigModal({ open, tenant, onClose, onSaved }) {
             setForm({
                 name: tenant.name || '',
                 email: tenant.email || '',
-                plan: tenant.plan || 'free',
                 onboarded: Boolean(tenant.onboarded),
             });
             setError(null);
@@ -37,7 +35,6 @@ export function TenantConfigModal({ open, tenant, onClose, onSaved }) {
                 tenant_id: tenant.tenant_id,
                 name: form.name,
                 email: form.email,
-                plan: form.plan,
                 onboarded: form.onboarded,
             });
             onSaved?.();
@@ -75,15 +72,6 @@ export function TenantConfigModal({ open, tenant, onClose, onSaved }) {
                             <span className="field-label">Billing email</span>
                             <div className="field-input">
                                 <input value={form.email} onChange={e => set('email', e.target.value)} placeholder="you@example.com" />
-                            </div>
-                        </label>
-
-                        <label className="field">
-                            <span className="field-label">Plan</span>
-                            <div className="field-input is-select">
-                                <select value={form.plan} onChange={e => set('plan', e.target.value)}>
-                                    {PLAN_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                                </select>
                             </div>
                         </label>
 

@@ -6,8 +6,6 @@ import { SuperAdminOverview } from './SuperAdminOverview.jsx';
 import { TenantsList } from './TenantsList.jsx';
 import { TenantDetail } from './TenantDetail.jsx';
 import { AuditLogPanel } from './AuditLogPanel.jsx';
-import { ImpersonationBanner } from './ImpersonationBanner.jsx';
-import { Dashboard } from './Dashboard.jsx';
 import { Topbar } from './Topbar.jsx';
 
 const VIEWS = {
@@ -20,12 +18,11 @@ const VIEWS = {
 // The Super Admin console. Entirely separate from the tenant Dashboard, which
 // it only renders through impersonation (passing a synthetic tenant user so the
 // existing tenant hooks scope correctly).
-export function SuperAdminApp({ theme, onToggleTheme, onLogout, user }) {
+export function SuperAdminApp({ theme, onToggleTheme, onLogout, user, onImpersonate }) {
     const { tenants, totals, status, error, reload } = useSuperAdmin();
 
     const [view, setView] = useState('overview');
     const [selectedId, setSelectedId] = useState(null);
-    const [impersonating, setImpersonating] = useState(null);
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
     // Derive the selected tenant from the live list so edits/reloads stay fresh.
@@ -41,41 +38,11 @@ export function SuperAdminApp({ theme, onToggleTheme, onLogout, user }) {
         setView('detail');
     }, []);
 
-    const startImpersonation = useCallback((tenant) => {
+    const startImpersonation = useCallback(async (tenant) => {
         logImpersonation(tenant); // best-effort audit record
-        setImpersonating(tenant);
-    }, []);
-    const exitImpersonation = useCallback(() => {
-        setImpersonating(null);
-        reload(); // pick up any changes made while viewing as the tenant
-    }, [reload]);
-
-    // ---- Impersonation: render the tenant's exact interface ----
-    if (impersonating) {
-        const tenantUser = {
-            kind: 'member',
-            id: impersonating.tenant_id,
-            tenantId: impersonating.tenant_id,
-            name: impersonating.name,
-            email: impersonating.email,
-        };
-        return (
-            <div className="imp-shell">
-                <ImpersonationBanner
-                    name={impersonating.name}
-                    email={impersonating.email}
-                    onExit={exitImpersonation}
-                />
-                <Dashboard
-                    theme={theme}
-                    onToggleTheme={onToggleTheme}
-                    onLogout={exitImpersonation}
-                    user={tenantUser}
-                    impersonated
-                />
-            </div>
-        );
-    }
+        const r = await onImpersonate?.(tenant); // swaps to a real tenant session (App renders the tenant Dashboard)
+        if (r && !r.ok) console.error('[Alluvi] impersonation failed', r.error);
+    }, [onImpersonate]);
 
     // ---- Console ----
     const meta = VIEWS[view];

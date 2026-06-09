@@ -1,11 +1,23 @@
 import { AlertTriangle, CheckCircle2, Play, X } from 'lucide-react';
 
+// Friendly labels for the live pipeline stage. run_pipeline writes a
+// stage_executions row at each step; useRunProgress surfaces the latest stage_name.
+const STAGE_LABELS = {
+    phasea: 'Creating persona portrait',
+    step1: 'Generating scene (PuLID)',
+    step2: 'Compositing product (Qwen)',
+    qc: 'Quality-checking image',
+    step3: 'Realism pass',
+    script: 'Writing video script',
+    video: 'Rendering video (WAN → lip-sync → merge)',
+};
+
 // Visual states:
 //   idle      → green RUN button
-//   active    → live progress pill ("2 personas · 5 images · 3 videos")
-//   completed → green "Pipeline complete · N videos" pill
-//   stalled   → amber warning + Re-run button
-export function RunControl({ running, onRun, runStartedAt, counts, completed, stalled, onClear, canRun = true, disabledReason }) {
+//   active    → live progress pill ("Compositing product (Qwen) · 1 image")
+//   completed → green "Pipeline complete · N videos" pill (only when the job succeeds)
+//   stalled   → amber warning + Re-run button (job failed, or no activity for 30 min)
+export function RunControl({ running, onRun, runStartedAt, counts, currentStage, completed, stalled, onClear, canRun = true, disabledReason }) {
     const hasRun = !!runStartedAt;
     const blocked = !canRun;
 
@@ -13,7 +25,7 @@ export function RunControl({ running, onRun, runStartedAt, counts, completed, st
         const v = counts.videos;
         return (
             <div className="run-cluster">
-                <div className="run-pill run-pill--done" title="The n8n pipeline finished">
+                <div className="run-pill run-pill--done" title="The pipeline finished">
                     <CheckCircle2 />
                     <span>Pipeline complete{v ? ` · ${v} video${v === 1 ? '' : 's'}` : ''}</span>
                     <button type="button" className="run-pill-clear" onClick={onClear} aria-label="Dismiss">
@@ -37,7 +49,7 @@ export function RunControl({ running, onRun, runStartedAt, counts, completed, st
     if (hasRun && stalled) {
         return (
             <div className="run-cluster">
-                <div className="run-pill run-pill--stalled" title="No new rows in the last 45 minutes — the run probably failed">
+                <div className="run-pill run-pill--stalled" title="The run failed, or had no activity for 30 minutes">
                     <AlertTriangle />
                     <span>Run stalled</span>
                     <button type="button" className="run-pill-clear" onClick={onClear} aria-label="Clear stalled run">
@@ -49,7 +61,7 @@ export function RunControl({ running, onRun, runStartedAt, counts, completed, st
                     className="btn btn-run"
                     onClick={onRun}
                     disabled={running || blocked}
-                    title={blocked ? (disabledReason || 'Complete run settings first') : 'Trigger the n8n pipeline again'}
+                    title={blocked ? (disabledReason || 'Complete run settings first') : 'Run the pipeline again'}
                 >
                     {running
                         ? <span className="btn-spinner" aria-hidden="true" />
@@ -65,12 +77,13 @@ export function RunControl({ running, onRun, runStartedAt, counts, completed, st
         if (counts.personas) parts.push(`${counts.personas} persona${counts.personas === 1 ? '' : 's'}`);
         if (counts.outputs)  parts.push(`${counts.outputs} image${counts.outputs === 1 ? '' : 's'}`);
         if (counts.videos)   parts.push(`${counts.videos} video${counts.videos === 1 ? '' : 's'}`);
-        const summary = parts.length ? parts.join(' · ') : 'pipeline running…';
+        const summary = parts.join(' · ');
+        const label = STAGE_LABELS[currentStage] || 'Pipeline running…';
 
         return (
             <div className="run-pill run-pill--active" title={`Started at ${new Date(runStartedAt).toLocaleTimeString()}`}>
                 <span className="run-pill-dot" />
-                <span>{summary}</span>
+                <span>{label}{summary ? ` · ${summary}` : ''}</span>
                 <button type="button" className="run-pill-clear" onClick={onClear} aria-label="Hide run status">
                     <X />
                 </button>
@@ -84,7 +97,7 @@ export function RunControl({ running, onRun, runStartedAt, counts, completed, st
             className="btn btn-run"
             onClick={onRun}
             disabled={running || blocked}
-            title={blocked ? (disabledReason || 'Complete run settings first') : 'Trigger the n8n pipeline now'}
+            title={blocked ? (disabledReason || 'Complete run settings first') : 'Run the pipeline now'}
         >
             {running
                 ? <span className="btn-spinner" aria-hidden="true" />
