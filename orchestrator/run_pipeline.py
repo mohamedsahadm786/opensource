@@ -389,8 +389,16 @@ def main() -> None:
         tenant_id = accounts[0]["tenant_id"]
         cfg = RV.get_pipeline_config(tenant_id)
 
-    global _TENANT_ID
+    global _TENANT_ID, STEP3_ENABLED, QC_ENABLED
     _TENANT_ID = tenant_id
+    # The web Run-settings checkboxes (tenant_pipeline_config.step_3_enabled /
+    # qc_enabled) drive these; the STEP_3_ENABLED / QC_ENABLED env vars stay as the
+    # fallback default when the config doesn't specify. (Option A: Stage 3 off means
+    # no realism AND no video — Phase C is anchored on the realism image.)
+    if (cfg or {}).get("step_3_enabled") is not None:
+        STEP3_ENABLED = bool(cfg["step_3_enabled"])
+    if (cfg or {}).get("qc_enabled") is not None:
+        QC_ENABLED = bool(cfg["qc_enabled"])
 
     n_scen = args.scenarios if args.scenarios is not None else int((cfg or {}).get("num_videos_per_account") or 1)
     controls = RV.resolve_controls(cfg, _CtlArgs(args))

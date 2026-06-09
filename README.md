@@ -259,3 +259,56 @@ origin to **Auth → URL Configuration** (needed for password-reset / impersonat
   internal tool sent to your own operators.
 - The browser ships the **publishable/anon key** (safe — RLS gates rows). The **service key lives only
   in `.env` / Edge Function secrets** and must never reach the browser or git.
+
+---
+
+## 8. Prompt tuning — where every prompt comes from
+
+> **Mental model (read once):** every prompt = a generic **RULE BOOK** (`.md` in
+> `orchestrator/rules/`) **+ per-tenant DB DATA**, assembled by a **BRAIN** (`run_*.py`).
+> **Edit the rule book → changes behavior for ALL tenants. Edit the DB data (what the briefs
+> produce) → changes ONE tenant.** Non-prompt knobs (steps / cfg / seed / denoise / LoRA) live in
+> `tenant_pipeline_config` (web Run-settings) or the ComfyUI workflow **on the pod**.
+> **After editing a rule book, just re-run — no redeploy** (the brain reads the `.md` fresh each run).
+
+### The 10 stages — what to edit to tune each
+
+| # | Stage (model) | Produces | Rule book → **all tenants** | DB data → **one tenant** | Final prompt stored in |
+|---|---|---|---|---|---|
+| 1 | **Portrait** — Phase A (Opus→FLUX) | the locked persona face | **`rules/phaseA.md`** | `tiktok_accounts` (gender/age/country/identity_factors) | `llm_calls` `phasea_prompt` |
+| 2 | **Scene** — Step 1 (Opus→PuLID) | persona in the scene | **`rules/step1.md`** | `scenarios.spec` | `image_generations` `step1` |
+| 3 | **Product** — Step 2 (Opus→Qwen) | real product composited in | **`rules/step2_qwen.md`** | **`products.packaging`** (`text_on_packaging` rendered **verbatim**) | `image_generations` `step2` |
+| 4 | **Realism** — Step 3 (RealVisXL) | photoreal final still | *none — pod ComfyUI workflow* | **`products.mask_prompt`** (box-protect) | `image_generations` `step3` |
+| 5 | **Script** (Opus) | per shot: **dialogue** + **Wan motion** + negative | **`rules/script.md`** | `tenants.script_company_info` + `products.product_info` + `tenants.script_directives` | `videos`, `media_generations` `shot_n`, `llm_calls` `script` |
+| 6 | **TTS** — F5 | the spoken voice | *(speaks #5's dialogue)* | account voice reference, else gender default wav | — |
+| 7 | **Wan video** | the moving silent clip | **`rules/script.md`** (motion section) | `video_generation_preferences`; steps/seed/punch-in → **Run-settings** | `media_generations` |
+| 8 | **Lip-sync** — LatentSync | mouth matched to audio | *none — audio + knob* | `lips_expression` → **Run-settings** | — |
+| 9 | **QC** — image validator (Sonnet) | pass/fail + retry | **`rules/qc.md`** (split on `===RUBRIC===`: system half = strictness, rubric half = checklist) | `products.qc_brief`, `qc_max_retries` | `qc_checks` |
+| 10 | **QC brief** — one-time/product (Opus vision) | the QC ground-truth | **`rules/qc_brief_builder.md`** | product photo + `packaging` → regenerate `qc_brief` | `products.qc_brief` |
+
+### "I want to change ___ → edit ___"
+
+| I want to change… | Edit this | Scope |
+|---|---|---|
+| How **faces** look | `rules/phaseA.md` | all tenants |
+| How **scenes** are framed / lit | `rules/step1.md` | all tenants |
+| How the **product is placed** | `rules/step2_qwen.md` | all tenants |
+| The **box look / printed text** | `products.packaging` (product brief) | one tenant |
+| The **box-protect** mask | `products.mask_prompt` (web field) | one tenant |
+| **Dialogue + Wan motion** style | `rules/script.md` *(same stage feeds both)* | all tenants |
+| One brand's **voice / what to say / avoid / camera** | `script_company_info` + `script_directives` (briefs) | one tenant |
+| Which **TTS voice** | account voice reference / default wav | one tenant / global |
+| **Realism strength / LoRA / denoise** | realism ComfyUI workflow (**pod**) | global |
+| **Lips / steps / seed / punch-in** | `tenant_pipeline_config` (web Run-settings) | one tenant |
+| **QC strictness / checklist** | `rules/qc.md` | all tenants |
+| **QC reference accuracy** | `rules/qc_brief_builder.md` → regenerate `qc_brief` | all / one |
+
+### Debug a bad result — *which prompt actually ran?*
+Per output, read the **real strings** that hit the models, find the weak stage, edit its rule book (or
+that tenant's DB data) from the table above, **re-run, compare**:
+- **images** → `image_generations` (`stage_name`, `prompt`, `negative_prompt`, `mask_prompt`, `seed`)
+- **video shots** → `media_generations` (`stage_name='shot_n'`, `prompt`=motion, `params.dialogue`)
+- **the Opus authoring step** → `llm_calls` (`purpose`, `user_message`, `raw_response`, `parsed_json`)
+
+In the web this is one click: **Publishing → open an output → Image debug / Video debug.** That is the
+tuning loop.
