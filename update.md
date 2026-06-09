@@ -9,7 +9,112 @@
 
 ---
 
-## 0. v2 revision (latest — read first)
+## v3 — operational + UX hardening (2026-06-09 session — READ THIS FIRST)
+
+> This session took the v2 build from "compiles" to "runs end-to-end, web-driven."
+> It made the Run button actually launch the pipeline, added live progress, fixed
+> several reference-leftover bugs, added real super-admin impersonation + forgot-
+> password, and wired the persona appearance control. **Where this disagrees with
+> v2/v1 below, this wins.** Everything here is committed + pushed to `main`
+> (`github.com/mohamedsahadm786/opensource`); the full README + `PROMPT_TUNING_MAP.md`
+> are the canonical references now.
+
+### Project facts (so you don't have to ask)
+- Supabase project ref **`ylmtphqqhhgfjurqjujs`**. Super-admin login **`admin` / `Alluvi@admin@1512`**.
+- Test tenant: **`sahad-c6fd0d`** (`6c7bf137-aeae-4914-8242-c107254c1156`), product **ALLUVI Tirzepatide**,
+  one account **@sahad** (persona already generated, has videos).
+- The orchestrator runs on the owner's PC; `orchestrator/.env` (gitignored) holds `SUPABASE_SECRET_KEY`,
+  `GATEWAY_URL=https://<POD_ID>-8191.proxy.runpod.net`, `GATEWAY_API_KEY`, `OPUS_MODEL=claude-opus-4-7`.
+- **All 6 Edge Functions are deployed + ACTIVE:** `provision-tenant`, `store-tenant-secret`,
+  `trigger-pipeline`, `admin-data`, `convert-briefs`, `generate-qc-brief`.
+
+### What got built / fixed this session
+1. **convert-briefs deployed + upgraded** — three type-specific system prompts (`PRODUCT_SYS` /
+   `COMPANY_SYS` / `SCRIPT_SYS`) with per-field guidance + worked examples, `max_tokens 4096`. Target
+   JSON shapes unchanged. (`supabase/functions/convert-briefs/index.ts`.)
+2. **`generate-qc-brief` Edge Function (NEW, deployed)** — Claude-vision QC ground-truth from the
+   product photo; mirrors `orchestrator/generate_qc_brief.py` (rules embedded). Called in the
+   Finish-setup chain after `convert-briefs` (non-fatal) and on **Product re-save when the photo is
+   swapped** (`{force:true}`). Helpers in `web/src/lib/briefs.js`.
+3. **`tenants_member_update` RLS policy** (live on DB + added to `001_alluvi_schema.sql`). Root cause
+   of the "Cannot coerce the result to a single JSON object" error on Finish-setup: `tenants` had no
+   UPDATE policy, so the member's `update tenants …` hit 0 rows. Members can now update their own row.
+4. **`orchestrator/run_worker.py` (NEW)** — the job consumer that makes the web **Run** button live.
+   Claims `pipeline_run` jobs via `claim_next_job`, runs `python run_pipeline.py --tenant <slug>`,
+   sets job status (fail-fast). **UTF-8 subprocess fix** (`PYTHONUTF8=1`) — without it the pipeline's
+   `✓` glyphs crashed under Windows cp1252. One worker per GPU.
+5. **`run_pipeline.py` — live stage markers + toggle wiring.** Writes a `stage_executions` row at each
+   step (`phasea/step1/step2/qc/step3/script/video`) so the web shows the live stage. And
+   `STEP3_ENABLED`/`QC_ENABLED` now read from `tenant_pipeline_config.step_3_enabled`/`qc_enabled`
+   (env vars are the fallback default). **Option A coupling: Stage 3 OFF ⇒ no realism AND no video**
+   (Phase C anchors on the realism image).
+6. **Web run progress rewired** — `useRunProgress` now drives completion from **`jobs.status`**
+   (`succeeded`/`failed`), not the old 5-min idle heuristic (which falsely showed "complete" mid-video).
+   Polls the latest `stage_executions` for the current stage; `RunControl` shows a friendly label
+   ("Compositing product (Qwen)…"); 8s poll.
+7. **Run gated until configured** — `num_videos_per_account` + `video_duration_seconds` now start
+   empty and are required; Run stays disabled (tooltip) until they're set + saved
+   (`usePipelineConfig`, `RunConfigModal`).
+8. **Forgot / reset password** — `useAuth` (`resetPassword`/`updatePassword` + `recovery`), `App`
+   routes the recovery link to a reset form, `LoginScreen` has `forgot`/`reset` modes + the link.
+   (Needs the app origin in Supabase Auth → URL Configuration.)
+9. **Publishing debug split + fix** — one Debug button → **Image debug** + **Video debug**
+   (`DebugModal` `mode` prop). Fixed the empty-prompts bug: `useOutputDebug` now joins
+   `image_generations` by **`output_asset_id`** (= `outputs.step1/2/3_asset_id`), because this pipeline
+   leaves `stage_executions`/`stage_execution_id` empty. `llm_calls` dropped from per-output debug
+   (no per-output link).
+10. **Analytics QC fix** — counted `qc_status === 'pass'` (reference value) but this pipeline writes
+    **`'passed'`/`'exhausted'`**. Now correct → pass rate / video conversion / top scenarios populate.
+11. **Super-admin FULL impersonation** — `admin-data` `impersonate` action mints a magic-link for the
+    tenant **owner**; the browser `verifyOtp`s into a real tenant session, so RLS passes and the exact
+    tenant Dashboard renders with full data + actions. `App` shows the banner + Dashboard; Exit restores
+    the admin. (`useAuth.impersonate`/`exitImpersonation`.) Fixes the old "shows the setup page" bug.
+12. **Removed "Plan"** everywhere in super-admin (`TenantDetail`, `TenantConfigModal`).
+13. **Run-settings modal overflow fixed** — `.field-row` → `grid-template-columns: repeat(2, minmax(0,1fr))`
+    + `.field { min-width:0 }`. "Specific accounts" supports **multiple** (checkbox list → `target_account_ids`).
+14. **Persona appearance control (verified working)** — the account form's "Identity factors (JSON)" is
+    now plain-English **"Appearance / body type"** (`identity_factors.appearance`). `run_portrait.py`
+    passes it to Opus as `appearance_request`; `rules/phaseA.md` + `TASK_BLOCK` honor a requested
+    heavier/plus-size build (kept compliance: 21+, not emaciated). **Before this, `identity_factors`
+    was dead data read by nothing** — that's why all portraits were slim. Verified: a "heavier/fat
+    build" request flowed brief → Opus prompt → FLUX render.
+15. **README rewritten** (architecture, phases/models/params, ports, A→Z run + deploy) and
+    **`PROMPT_TUNING_MAP.md`** added (per-stage prompt tuning reference).
+
+### The ONE backend task still NOT done (flag to owner)
+- **GPU host from DB.** The orchestrator still reads `GATEWAY_URL` from `orchestrator/.env`, NOT the
+  tenant's `gpu_host`/`gpu_url_template`. So the web Settings GPU field is **stored but not used by
+  runs** yet. On every pod restart you must update `.env` `GATEWAY_URL` and restart `run_worker.py`.
+  Wiring this (build the URL from the tenant row) is the last piece for true multi-tenant/multi-pod.
+
+### How a run works now (the loop)
+Web **Run** → `trigger-pipeline` enqueues `jobs(pipeline_run)` → **`run_worker.py`** (must be running on
+the PC) claims it → `run_pipeline.py --tenant <slug>` drives the RunPod gateway (`:8191`) → writes
+`stage_executions` (live progress) + outputs/videos → web pill shows the stage and flips to complete on
+`jobs.status='succeeded'`. In production, run `run_worker.py` as an always-on service (NSSM/systemd/pm2).
+
+### Verifying changes (the methods used this session)
+- **Stage progress / which stages ran:** `select stage_name, created_at from stage_executions where
+  tenant_id=… and created_at > now() - interval '20 minutes' order by created_at;`
+- **Toggle test (QC/Stage-3 off):** no `qc`/`step3`/`video` markers; `outputs.qc_status` null,
+  `step3_asset_id` null; video count unchanged; `v_tenant_exploration_progress.resolved_curated`
+  unchanged (a step2-only output is NOT counted toward coverage — resolved = `step3_done` OR
+  `qc_status in (passed,exhausted,skipped,fail,failed)`).
+- **Appearance request reached the model:** `select user_message, parsed_json->'identity'->>'body_type',
+  parsed_json->>'portrait_prompt' from llm_calls where purpose='phasea_prompt' order by created_at desc limit 1;`
+- **Cross-tenant / job state:** query via the service key (curl `…/rest/v1/<table>` with the secret key),
+  since RLS hides cross-tenant rows from the anon key.
+- **Revert any change:** everything is committed; `git checkout -- <file>` restores the pushed version.
+
+### Prompt tuning (where every prompt comes from)
+See **README §8** and **`PROMPT_TUNING_MAP.md`**. Short version: every prompt = a generic **rule book**
+(`orchestrator/rules/*.md`, edit → all tenants) + per-tenant **DB data** (briefs/product, edit → one
+tenant), assembled by a **brain** (`run_*.py`). Edit a rule book → just re-run, no redeploy. Dialogue +
+Wan motion are the same stage (`script.md`); realism strength/LoRA lives in the pod ComfyUI workflow.
+
+---
+
+## 0. v2 revision (previous)
 
 The owner revised the brief ("Rebuild Brief v2"). Where v2 disagrees with v1, **v2 wins.**
 Implemented:
