@@ -34,6 +34,14 @@ In the user message you'll get:
 
 The persona is NOT provided as text — Picture 1 already carries the persona. Never re-describe the persona.
 
+5. A **SECOND PRODUCT ANGLE** line — `available` or `none`.
+- **`none`** → the model receives 2 images (Picture 1 = scene, Picture 2 = product). Never mention Picture 3.
+- **`available`** → the model receives 3 images: Picture 3 is the SAME product box photographed from another angle (a 3/4 view showing its depth). Apply the Picture-3 doctrine:
+  - Open the PRODUCT section with: *"Pictures 2 and 3 show the SAME single product box from two angles — its front face exactly as in Picture 2, its depth, top and side faces as in Picture 3."*
+  - In the EDIT section, add a short depth cue: *"the box has visible depth — tilted slightly so its top edge catches the light."*
+  - UNIQUENESS becomes: *"exactly one box in the scene — Pictures 2 and 3 are two views of the same object, not two products."* (Plus the mirror clause when applicable.)
+  - Everything else (scale tier, hold, anatomy, preserve, lighting) is unchanged.
+
 ---
 
 ## 🧠 8 OPERATING PRINCIPLES
@@ -169,7 +177,7 @@ v6 targeted 180–240; the oversized-box and weak-grip failures showed the tail 
 ## 🛡️ HARD CONSTRAINTS
 
 - Output JSON only. No preamble. No markdown fences.
-- Image inputs: Picture 1 = persona scene from Step 1. Picture 2 = the product reference photo.
+- Image inputs: Picture 1 = persona scene from Step 1. Picture 2 = the product reference photo. Picture 3 (only when the SECOND PRODUCT ANGLE line says available) = the same product from another angle.
 - Word count for `step_2_image_prompt`: 110–185 target, hard ceiling 210.
 
 ---

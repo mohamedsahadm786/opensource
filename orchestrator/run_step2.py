@@ -84,7 +84,7 @@ def pick_output(persona_id: str, selector: str) -> dict:
 
 
 def get_product(tenant_id: str) -> dict:
-    rows = sb().table("products").select("name,packaging,reference_asset_id").eq("tenant_id", tenant_id).limit(1).execute().data
+    rows = sb().table("products").select("*").eq("tenant_id", tenant_id).limit(1).execute().data
     if not rows:
         sys.exit("[step2] no product for this tenant")
     if not rows[0].get("reference_asset_id"):
@@ -114,9 +114,13 @@ def get_anthropic_key(tenant_id: str) -> str:
 
 
 def build_user_message(product: dict, scenario_spec: dict, step1_prompt: str | None) -> str:
+    angle = "available (Picture 3 = the SAME box from another angle — use the rule book's Picture-3 doctrine)" \
+        if product.get("reference_angle_asset_id") else "none (only Pictures 1 and 2 — never mention Picture 3)"
     return "\n".join([
         "=== PRODUCT packaging data (quote text_on_packaging VERBATIM) ===",
         json.dumps({"name": product.get("name"), "packaging": product.get("packaging")}, indent=2, ensure_ascii=False),
+        "",
+        f"=== SECOND PRODUCT ANGLE === {angle}",
         "",
         "=== SCENARIO ===",
         json.dumps(scenario_spec, indent=2, ensure_ascii=False),
@@ -217,11 +221,14 @@ def main() -> None:
         print("[step2] --dry-run: not enqueued. Review the prompt above, then re-run without --dry-run.")
         return
 
-    job_id = enqueue_step2({
+    payload = {
         "tenant_id": tenant_id, "account_id": account["id"], "persona_id": persona["id"],
         "scenario_id": scenario_id, "scenario_key": scenario_key,
         "step_2_prompt": step_2_prompt, "qwen_params": qwen_params,
-    })
+    }
+    if product.get("reference_angle_asset_id"):
+        payload["product_angle_asset_id"] = product["reference_angle_asset_id"]
+    job_id = enqueue_step2(payload)
     print(f"[step2] enqueued job {job_id}; polling…")
     final = poll(job_id)
     print(f"\n[step2] FINAL: {json.dumps(final, indent=2)}")

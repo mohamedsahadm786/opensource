@@ -48,6 +48,10 @@ import websocket  # websocket-client
 # ── Project paths ────────────────────────────────────────────────────────
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PRODUCT_IMAGE_PATH = REPO_ROOT / "assets" / "product.jpg"
+# Optional SECOND product reference (a 3/4 angled view of the SAME box).
+# When this file exists (the gateway worker downloads it per tenant), the basic
+# workflow is swapped for the 3-reference template so Qwen sees the box's depth.
+PRODUCT_ANGLE_IMAGE_PATH = REPO_ROOT / "assets" / "product_angle.jpg"
 WORKFLOW_DIR = REPO_ROOT / "comfyui_workflows"
 
 # Workflow selection via env var (the comeback switch)
@@ -56,6 +60,7 @@ if _WF_NAME == "advance":
     WORKFLOW_TEMPLATE_PATH = WORKFLOW_DIR / "qwen_edit_2511_product_advance.json"
 else:
     WORKFLOW_TEMPLATE_PATH = WORKFLOW_DIR / "qwen_edit_2511_product.json"
+WORKFLOW_TEMPLATE_3REF_PATH = WORKFLOW_DIR / "qwen_edit_2511_product_3ref.json"
 
 # ── ComfyUI install + server config ──────────────────────────────────────
 COMFYUI_DIR = Path(os.environ.get(
@@ -180,7 +185,9 @@ def _parse_image_size(value) -> tuple[int, int] | None:
 def _build_workflow(prompt: str, negative: str,
                     persona_name: str, product_name: str,
                     width: int, height: int, steps: int,
-                    cfg: float, seed: int) -> dict:
+                    cfg: float, seed: int,
+                    template_path: Path | None = None,
+                    product_angle_name: str | None = None) -> dict:
     """Load the JSON template and substitute placeholders.
 
     Numeric placeholders are QUOTED in the template (e.g. "__SEED__") so the
@@ -188,7 +195,7 @@ def _build_workflow(prompt: str, negative: str,
     String placeholders are set after json.loads() so prompt text with
     quotes/newlines is handled safely.
     """
-    raw = WORKFLOW_TEMPLATE_PATH.read_text(encoding="utf-8")
+    raw = (template_path or WORKFLOW_TEMPLATE_PATH).read_text(encoding="utf-8")
     # numeric — replace the quoted placeholder so result is a bare int/float
     raw = raw.replace('"__WIDTH__"', str(width))
     raw = raw.replace('"__HEIGHT__"', str(height))
@@ -201,6 +208,8 @@ def _build_workflow(prompt: str, negative: str,
         wf["4"]["inputs"]["image"] = persona_name
     if "5" in wf:
         wf["5"]["inputs"]["image"] = product_name
+    if "12" in wf and product_angle_name:
+        wf["12"]["inputs"]["image"] = product_angle_name
     if "6" in wf:
         wf["6"]["inputs"]["prompt"] = prompt
     if "7" in wf:
@@ -310,24 +319,42 @@ def generate(
     shutil.copy(step_1_local_path, COMFYUI_INPUT_DIR / persona_name)
     shutil.copy(PRODUCT_IMAGE_PATH, COMFYUI_INPUT_DIR / product_name)
 
+    # optional second product angle -> 3-reference workflow (basic mode only;
+    # the advance template has no image3 path). Absent file = behavior unchanged.
+    product_angle_name = None
+    template_path = WORKFLOW_TEMPLATE_PATH
+    if PRODUCT_ANGLE_IMAGE_PATH.exists() and WORKFLOW_TEMPLATE_3REF_PATH.exists():
+        if _WF_NAME == "advance":
+            print(f"[step_2_comfyui] [{scenario_id}] product_angle.jpg present but "
+                  f"ALLUVI_COMFY_WORKFLOW=advance — angle ignored (no image3 in advance template)")
+        else:
+            product_angle_name = f"alluvi_product_angle_{tag}.jpg"
+            shutil.copy(PRODUCT_ANGLE_IMAGE_PATH, COMFYUI_INPUT_DIR / product_angle_name)
+            template_path = WORKFLOW_TEMPLATE_3REF_PATH
+            print(f"[step_2_comfyui] [{scenario_id}] second product angle found — "
+                  f"using 3-reference workflow (Picture 3 = product angle)")
+
     workflow = _build_workflow(
         prompt=step_2_prompt, negative=negative,
         persona_name=persona_name, product_name=product_name,
         width=width, height=height, steps=num_steps,
         cfg=cfg, seed=seed,
+        template_path=template_path, product_angle_name=product_angle_name,
     )
 
+    image_urls = [str(Path(step_1_local_path).resolve()), str(PRODUCT_IMAGE_PATH.resolve())]
+    if product_angle_name:
+        image_urls.append(str(PRODUCT_ANGLE_IMAGE_PATH.resolve()))
     resolved_args = {
         "prompt": step_2_prompt,
         "negative_prompt": negative,
-        "image_urls": [str(Path(step_1_local_path).resolve()),
-                       str(PRODUCT_IMAGE_PATH.resolve())],
+        "image_urls": image_urls,
         "num_inference_steps": num_steps,
         "cfg": cfg,
         "width": width, "height": height,
         "seed": seed,
         "backend": "comfyui",
-        "workflow_template": WORKFLOW_TEMPLATE_PATH.name,
+        "workflow_template": template_path.name,
         "comfyui_server": SERVER_ADDR,
     }
     audit_path = out_path.parent / f"{out_path.stem}_request.json"
@@ -338,7 +365,7 @@ def generate(
         encoding="utf-8")
     print(f"[step_2_comfyui] [{scenario_id}]   request audit -> {audit_path.name}")
     print(f"[step_2_comfyui] [{scenario_id}] submitting "
-          f"(wf={WORKFLOW_TEMPLATE_PATH.name}, steps={num_steps}, cfg={cfg}, "
+          f"(wf={template_path.name}, steps={num_steps}, cfg={cfg}, "
           f"size={width}x{height}, seed={seed})")
 
     t0 = time.time()
@@ -352,7 +379,9 @@ def generate(
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     img.save(out_path, "JPEG", quality=95)
 
-    for nm in (persona_name, product_name):
+    for nm in (persona_name, product_name, product_angle_name):
+        if not nm:
+            continue
         try:
             (COMFYUI_INPUT_DIR / nm).unlink(missing_ok=True)
         except Exception:

@@ -162,8 +162,7 @@ def do_scene(account, persona, scenario_uuid, scenario_key, scenario_spec, api_k
 
 
 def get_product_full(tenant_id: str) -> dict:
-    rows = sb().table("products").select(
-        "name,packaging,qc_brief,qc_max_retries,reference_asset_id").eq("tenant_id", tenant_id).limit(1).execute().data
+    rows = sb().table("products").select("*").eq("tenant_id", tenant_id).limit(1).execute().data
     if not rows:
         raise RuntimeError("no product for tenant")
     return rows[0]
@@ -222,10 +221,13 @@ def do_product(account, persona, scenario_uuid, scenario_key, scenario_spec, api
         raw, usage = _opus(api_key, step2_md, user_msg)
         parsed = RS2.parse_json(raw)
         RS2.log_llm_call(account["tenant_id"], user_msg, raw, usage, parsed)
-        job_id = RS2.enqueue_step2({
+        step2_payload = {
             "tenant_id": account["tenant_id"], "account_id": account["id"], "persona_id": persona["id"],
             "scenario_id": scenario_uuid, "scenario_key": scenario_key, "attempt": attempt,
-            "step_2_prompt": parsed["step_2_image_prompt"], "qwen_params": parsed["fal_qwen_params"]})
+            "step_2_prompt": parsed["step_2_image_prompt"], "qwen_params": parsed["fal_qwen_params"]}
+        if product.get("reference_angle_asset_id"):
+            step2_payload["product_angle_asset_id"] = product["reference_angle_asset_id"]
+        job_id = RS2.enqueue_step2(step2_payload)
         d = _dur(_ok(_poll(job_id), f"product (attempt {attempt})"))
         dtxt = f" ({d:.0f}s)" if d else ""
 
