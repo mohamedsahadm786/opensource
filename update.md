@@ -9,6 +9,123 @@
 
 ---
 
+## v4 — image-quality + QC overhaul (2026-06-10 session — READ THIS FIRST)
+
+> This session fixed both pending.md problems, added the second-product-angle (Picture 3)
+> feature end-to-end, and rebuilt QC into a zero-tolerance, intent-aware gate with a
+> fail=skip pipeline flow. Commits `42e4cff` → `930d5c9`, all pushed. Where this disagrees
+> with v3/v2 below, this wins. `pending.md` has the per-problem detail; `PROMPT_TUNING_MAP.md`
+> + README §8 are still the prompt-tuning map (note: QC model/states changed — see #4).
+
+### 1. Step-1 (PuLID) — locked BODY BUILD now reaches the scene (`42e4cff`)
+- Root cause of pending.md Problem 1: `run_scene.py` passed only `prompt_descriptors`
+  (face-only); `identity.body_type` never reached Opus, and `rules/step1.md` banned body
+  words + had six all-slim calibration examples. FLUX defaulted every body to slim/fit.
+- Fix: `run_scene.build_user_message` now emits an authoritative `=== PERSONA BUILD ===`
+  block (body_type + body_proportions + height_impression; omitted if absent → behavior
+  unchanged). `step1.md` got principle **2b** (build phrase mandatory in sentence 1, even
+  in athletic scenarios), a narrowed ban (contradictions only), and **diversified examples**
+  (lean young F, heavier/plus-size 55yo F in the gym, stocky 48yo M, average 31yo F) +
+  Anti-Example F. VERIFIED on GPU: heavier 55yo persona held through the gym scenario.
+- Also: hand language is **positive-only** ("not in her pockets" planted the pocket token —
+  FLUX rendered it; observed). Each hand gets an explicit visible place; the words
+  pocket/hidden/tucked/crossed are banned from emitted prompts.
+
+### 2. Step-2 (Qwen) — v7 rule book (`de05aa2`, `24e0124`, `ebccc52`)
+- Research-verified facts: ComfyUI's encoder prepends literal **"Picture 1/2/3:"** labels
+  (prompts now use those, never "first image"); no truncation at our lengths (1024-pos cap);
+  the real enemy is attention dilution; FLUX negation-blindness is real, Qwen edit-constraint
+  negations ("do not add visible fingers") are fine but content negation is not.
+- **Scale doctrine**: Opus converts the packaging's real dims into a body-relative size tier
+  (large carton = forearm-length spanning the hands; medium = hand-span; small = palm), always
+  with upper+lower bounds + "big enough that its front-face text reads clearly" (scale IS the
+  text-fidelity lever). **Thickness anchor**: proportion from dims but **Picture 3 is the
+  visual authority — round DOWN** ("SLIM flat carton ~one tenth of its long side").
+- **Presentation hold**: two-handed (cup bottom edge + steady top corner) preferred when both
+  hands free; single-hand lower-edge grip when a phone occupies one; explicit **arm re-pose**
+  when Picture 1's hand is occupied/crossed (fixes box-on-forearm).
+- Budgets: 110–185 (210 ceiling), 140–200/230 with Picture 3; Opus can't count words so the
+  BRAIN overwrites `word_count` with the real count (`run_scene`/`run_step2.parse_json`).
+  Real prompts land ~280–310 words — over target, inside all hard caps, quality verified.
+- Compliance: injection/needle/syringe banned even for printed box graphics ("pen device").
+
+### 3. Second product angle — Picture 3 for 3D depth (`48fae96`, `7356462`, `c057f0a`)
+- Why: one front photo carries text but zero depth → flat-card boxes. Hard limit is 3 images
+  total (ComfyUI node: image1/2/3), so persona + product-front + ONE angle fits exactly.
+- Chain (all optional/additive — no angle = byte-identical old behavior):
+  migration **020** `products.reference_angle_asset_id` (APPLIED) → web upload
+  "Product photo 2 — angled 3/4 view (optional)" on Setup+Product pages → orchestrator adds
+  `product_angle_asset_id` to the step2 payload + a SECOND PRODUCT ANGLE available/none line
+  for Opus → gateway worker downloads it → qwen-service writes temp + monkey-patches
+  `q.PRODUCT_ANGLE_IMAGE_PATH` (unconditionally, multi-tenant-safe) → `step_2_qwen_comfyui.py`
+  auto-selects `qwen_edit_2511_product_3ref.json` when the file exists.
+- **Pod facts**: `/workspace/alluvi-clean` is NOT a git clone — update it by curl-ing raw
+  GitHub files (backup at `src/step_2_qwen_comfyui.py.bak`). The gateway worker forwards
+  images as base64 to the qwen-service which uses a fresh temp dir per job. Pod-side
+  app.py/worker.py/qwen-service edits were made by the owner's pod-Claude (not in this repo).
+- VERIFIED end-to-end: payload carried the id, qwen-service log showed
+  `using 3-reference workflow`, the box rendered with real side/top faces.
+- Picture-3 prompt doctrine: "Pictures 2 and 3 show the SAME single box", thickness anchor,
+  strengthened uniqueness. CLI seeder: `seed_product_angle.py --image <path>` / `--remove`
+  (= instant off-switch back to one-photo flow). Test angle photo = green-background 3/4 shot.
+- DATA CAVEAT: `packaging.dims` came from convert-briefs ESTIMATING depth (said 4cm, real
+  ~2cm → fat boxes). Fixed for the test tenant (18x8x2cm). Real tenants must put real
+  measurements in the product brief (re-saving the brief regenerates packaging!).
+
+### 4. QC overhaul — zero-tolerance anatomy, fail=skip (`561f09d`, `930d5c9`)
+- **Pipeline flow**: Qwen → QC → retries (1+`qc_max_retries`) → pass → realism → video;
+  ALL retries fail → `qc_status='failed'` → **no realism, no video**, scenario is CONSUMED
+  (never re-picked — was an infinite-retry bug in `pick_scenarios`; active-phase engine
+  selection also excludes it) and still counts toward the 60-scenario engine flip
+  (the coverage view counts 'failed' as resolved). Terminal states: **passed | failed** only
+  ('exhausted' is dead; null = QC off/pending).
+- **Rubric** (`rules/qc.md`): numbered whole-frame HAND CENSUS + held-objects cross-check +
+  "one arm has ONE hand — never merge entries"; `qc.py` does code-side arithmetic (regex-counts
+  the census's numbered entries; >2 hands fails even if the model's bool/count rationalizes);
+  truncated-limb gate (image-border crops = normal framing; mid-frame stumps = fail); 6+
+  fingers; intent-aware placement via `{{INTENDED_PLACEMENT}}` from `scenarios.spec`
+  (held intent must be IN a hand; surface placement NEVER fails for not-held; floating/dumped
+  always fails; flat_lay expects person_count 0); proportion gate (rectangle never square,
+  ~90%); two-tier text (brand+product name STRICT, secondary lenient); colors ~85%.
+- **Judge = `claude-opus-4-7`** (QC_MODEL default; env-overridable). Empirical: Sonnet 4.6
+  rationalized a 3-hand leftover away TWICE; Opus counted it correctly with surgical feedback.
+  (`claude-sonnet-4-6` DOES exist on the tenant key — verified via /v1/models; earlier
+  "no such model" was a date-suffixed ID.) Fail-open on QC infra errors is preserved.
+- **Reference = brief-only** (owner's call, zero per-call image cost): `qc_brief_builder.md`
+  now bakes in the aspect-ratio class + designates the strict brand/product-name pair;
+  the test tenant's qc_brief was REGENERATED with it.
+- **Retry feedback**: QC issues are short imperative content phrases → AVOID section for
+  Opus → woven into the next Qwen prompt as plain content constraints; the rule book FORBIDS
+  retry-meta words (previous/attempt/retry/error/QC) in `step_2_image_prompt`. Verified live:
+  zero leakage, constraint embedded ("Two hands total in the frame, no other hand anywhere").
+- VERIFIED on 4 stored composites: 3-hand sahad gym FAIL, fat gym mirror FAIL (real 3rd
+  hand + garbled headline), patio two-hand PASS, desk surface placement passes placement
+  (fails only strict text — per spec).
+
+### Operational discoveries (will save you hours)
+- **Gateway job idempotency**: `scene:<persona>:<scenario>` (NO attempt — a finished scene
+  can never re-run via payload; null the `jobs.idempotency_key` row to force) vs
+  `step2:<persona>:<scenario>:a<attempt>` (bump attempt to force). Helper:
+  `orchestrator/_rerun_gym_test.py` (TEMP, untracked — reuses last logged prompts, verifies
+  the returned job was created TODAY instead of trusting "succeeded"; delete when done).
+- A "succeeded in 5s" job = the gateway echoing an OLD job. Always check `created_at`.
+- Storage REST downloads need BOTH headers: `Authorization: Bearer <key>` AND `apikey:`.
+- Windows: PYTHONUTF8=1 for any orchestrator CLI that prints ✓/—; Git-Bash heredocs eat
+  backslashes in inline python (write a temp .py instead).
+
+### Known issues / next steps
+1. **`held_with_phone` scenarios systematically render a 3rd hand** (Qwen keeps the phone AND
+   adds two box-hands). Hardened QC now correctly fails these → they'll burn retries. Root fix
+   = Step-2 prompt pattern for phone scenarios (likely: single box-hand only, never instruct
+   the phone hand). NEXT TUNING TARGET.
+2. Step-2 rule book says "box/carton" throughout — works for any product via packaging data,
+   but bottles/jars/pouches would fight the wording. Generalize when a non-box tenant arrives.
+3. Web product-brief form: add a hint to include REAL measurements (see dims caveat above).
+4. `orchestrator/_rerun_gym_test.py` is temp — delete when the tuning round closes.
+5. GPU-host-from-DB (v3 item) still pending: orchestrator reads GATEWAY_URL from .env.
+
+---
+
 ## v3 — operational + UX hardening (2026-06-09 session — READ THIS FIRST)
 
 > This session took the v2 build from "compiles" to "runs end-to-end, web-driven."
