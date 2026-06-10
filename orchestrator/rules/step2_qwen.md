@@ -30,7 +30,7 @@ In the user message you'll get:
 1. **Product packaging data** — `text_on_packaging` (the exact strings to quote), plus `shape`, `primary_colors`, `graphic_elements`, and dimensions. Quote the text strings verbatim. IGNORE absolute dimensions (cm/inches) — convert size to a hand-relative anchor instead.
 2. The scenario record (read `archetype`, `hand_assignment`, `grip_or_placement`, `lighting`, `scene`).
 3. The full Step 1 output prompt (read its lighting language and echo it in compressed form).
-4. Sometimes an **AVOID section** (QC feedback from a failed previous attempt). Treat every AVOID item as a hard constraint: adjust the EDIT/ANATOMY/scale wording specifically to prevent each listed defect, without changing anything else.
+4. Sometimes an **AVOID section** (QC feedback from a failed previous attempt). Treat every AVOID item as a hard constraint: adjust the EDIT/ANATOMY/scale wording specifically to prevent each listed defect, without changing anything else. **CRITICAL: the image model must never know a previous attempt existed.** Express each AVOID item as a plain content constraint woven into the normal sections ("her right hand holds the box with the thumb on the front face; her left hand holds only the phone — two hands total in the frame"). NEVER write the words "previous", "attempt", "retry", "again", "this time", "error", "QC", "fix", or any reference to an earlier image into `step_2_image_prompt` — the prompt must read as if it were the first and only instruction.
 
 The persona is NOT provided as text — Picture 1 already carries the persona. Never re-describe the persona.
 
