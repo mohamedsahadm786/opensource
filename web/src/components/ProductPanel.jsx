@@ -9,9 +9,10 @@ import { ProductFields } from './ProductFields.jsx';
 // The single product per tenant — view + edit.
 export function ProductPanel({ tenantId }) {
     const toast = useToast();
-    const { product, photoUrl, status, error, reload, save } = useProduct(tenantId);
+    const { product, photoUrl, anglePhotoUrl, status, error, reload, save } = useProduct(tenantId);
     const [form, setForm] = useState(productFormFromRow(null));
     const [photoFile, setPhotoFile] = useState(null);
+    const [anglePhotoFile, setAnglePhotoFile] = useState(null);
     const [saving, setSaving] = useState(false);
 
     useEffect(() => { if (status === 'ready') setForm(productFormFromRow(product)); }, [status, product]);
@@ -22,11 +23,12 @@ export function ProductPanel({ tenantId }) {
         e.preventDefault();
         const built = buildProductPayload(form);
         if (!built.ok) { toast.error(built.error); return; }
-        const photoChanged = Boolean(photoFile);
+        const photoChanged = Boolean(photoFile); // photo 1 only — QC ground truth comes from the front photo
         setSaving(true);
         try {
-            await save(built.payload, photoFile);
+            await save(built.payload, photoFile, anglePhotoFile);
             setPhotoFile(null);
+            setAnglePhotoFile(null);
             // Re-derive the structured product JSON (name/product_info/packaging) from the brief.
             await convertBriefs({ product_brief: built.payload.product_brief_text });
             // If the product photo was swapped, refresh the QC ground-truth brief
@@ -89,6 +91,10 @@ export function ProductPanel({ tenantId }) {
                             photoFile={photoFile}
                             onPhoto={setPhotoFile}
                             onClearPhoto={() => setPhotoFile(null)}
+                            anglePhotoUrl={anglePhotoUrl}
+                            anglePhotoFile={anglePhotoFile}
+                            onAnglePhoto={setAnglePhotoFile}
+                            onClearAnglePhoto={() => setAnglePhotoFile(null)}
                         />
                     </div>
                     <footer className="settings-foot">

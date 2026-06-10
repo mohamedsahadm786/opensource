@@ -20,6 +20,7 @@ export function TenantSetup({ user, tenantId, saveTenantConfig, storeAnthropicKe
     const [scriptBrief, setScriptBrief] = useState('');
     const [product, setProduct] = useState(emptyProductForm);
     const [photoFile, setPhotoFile] = useState(null);
+    const [anglePhotoFile, setAnglePhotoFile] = useState(null);   // optional 3/4 view — NOT in canSave
 
     const [saving, setSaving] = useState(false);
     const [phase, setPhase] = useState('');     // status text while saving
@@ -42,7 +43,7 @@ export function TenantSetup({ user, tenantId, saveTenantConfig, storeAnthropicKe
 
             setPhase('Saving your briefs…');
             await saveTenantConfig({ gpu_host: gpuHost, company_brief_text: companyBrief, script_brief_text: scriptBrief });
-            await saveProduct(built.payload, photoFile);
+            await saveProduct(built.payload, photoFile, anglePhotoFile);
 
             setPhase('Converting your briefs with Claude…');
             await convertBriefs({
@@ -148,6 +149,9 @@ export function TenantSetup({ user, tenantId, saveTenantConfig, storeAnthropicKe
                         photoFile={photoFile}
                         onPhoto={setPhotoFile}
                         onClearPhoto={() => setPhotoFile(null)}
+                        anglePhotoFile={anglePhotoFile}
+                        onAnglePhoto={setAnglePhotoFile}
+                        onClearAnglePhoto={() => setAnglePhotoFile(null)}
                     />
                 </div>
 
