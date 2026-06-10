@@ -87,10 +87,12 @@ Above 280: approaches FLUX.1-dev's T5XXL 512-token limit and risks tail truncati
 REQUIRED: `fal_pulid_params.max_sequence_length` must be"512"(NOT"256") — at "256" (~210 word cap) the calibration examples truncate the sentence-5 camera anchor + identity lock.
 
 **Trimming priority when over budget:**
-1. Cut redundant scene props (e.g. "a folded teak deck chair to her right with a cream linen throw draped over it" → "a folded teak deck chair to her right")
+1. Cut redundant scene props (e.g. "a folded teak deck chair to her right with a cream linen throw draped over it" → "a folded teak deck chair to her right"). Sentence 2 names at most FOUR props — a longer prop list dilutes PuLID and eats the budget.
 2. Cut palette adjectives (e.g. "warm gold, teak wood, deep amber, soft sky cool" → "warm gold, deep amber")
 3. Cut redundant pose details if the empty-hand position is already specific
 4. NEVER cut: persona descriptor, the locked-build phrase, photoreal anchors (early + late), identity-lock line
+
+**The ceiling is a HARD limit.** Past ~290 words the prompt approaches the 512-token cap and the identity-lock tail gets truncated — the worst possible failure. If your draft exceeds the ceiling, TRIM per the priority list before you output. `word_count` must be the REAL count of the words you wrote — count them; never copy a number from the calibration examples.
 
 **Close-up exception:** scenarios where face is dominant (`framing` field contains "close-up") require `face_descriptor_full` plus `identity_lock_close_up`. For these, budget is 250–290 words. Annotate `word_count` honestly either way.
 

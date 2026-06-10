@@ -36,11 +36,13 @@ The persona is NOT provided as text — Picture 1 already carries the persona. N
 
 5. A **SECOND PRODUCT ANGLE** line — `available` or `none`.
 - **`none`** → the model receives 2 images (Picture 1 = scene, Picture 2 = product). Never mention Picture 3.
-- **`available`** → the model receives 3 images: Picture 3 is the SAME product box photographed from another angle (a 3/4 view showing its depth). Apply the Picture-3 doctrine:
-  - Open the PRODUCT section with: *"Pictures 2 and 3 show the SAME single product box from two angles — its front face exactly as in Picture 2, its depth, top and side faces as in Picture 3."*
-  - **Add a THICKNESS anchor right after it.** Image models exaggerate newly visible depth, so bound it. Derive the proportion from the packaging dims (you understand the units), but **Picture 3 is the visual authority — if the stated dims imply a thicker box than a typical slim carton, trust the photo and round DOWN, never up.** For a slim carton write *"it is a SLIM flat carton — its thickness is only about one tenth of its long side, like a thin chocolate box; keep it exactly as thin as it appears in Picture 3, never thicker."* For a genuinely deep box, state its true proportion instead (e.g. "about a third as deep as it is wide"). Side faces carry only the small print visible in Picture 3 — never enlarge side text.
-  - In the EDIT section, add a short depth cue: *"the box has visible depth — tilted slightly so its top edge catches the light."*
-  - UNIQUENESS becomes: *"exactly one box in the scene — Pictures 2 and 3 are two views of the same object, not two products."* (Plus the mirror clause when applicable.)
+- **`available`** → the model receives 3 images: Picture 3 is the SAME product box photographed from another angle (a 3/4 view showing its depth). Apply the Picture-3 doctrine — **in this COMPACT canonical form (it fits the budget; do not expand it):**
+  - PRODUCT header + opener becomes ONE compressed clause:
+    *"PRODUCT (match Pictures 2 and 3 — the SAME single box; front face from Picture 2, depth and sides from Picture 3): a SLIM flat carton, its thickness about one tenth of its long side — exactly as thin as in Picture 3, never thicker."*
+    Derive the proportion from the packaging dims, but **Picture 3 is the visual authority — round DOWN, never up**. For a genuinely deep box state its true proportion instead ("about a third as deep as it is wide"). Add *"side faces carry only small print"* ONLY if budget allows.
+  - In the EDIT section, fold the depth cue into the tilt phrase: *"tilted slightly so its top edge catches the light"* — no separate depth sentence.
+  - UNIQUENESS becomes: *"exactly one box — Pictures 2 and 3 are two views of the same object."* (Plus the mirror clause when applicable.)
+  - **Budget with Picture 3: 140–200 words target, hard ceiling 230.** The doctrine clauses are part of the budget, not an excuse to exceed it — compress PRODUCT graphics to at most TWO elements and trim LIGHTING first.
   - Everything else (scale tier, hold, anatomy, preserve, lighting) is unchanged.
 
 ---
@@ -135,9 +137,10 @@ Compress the scenario/Step-1 lighting to ONE short line (do not paste Step 1's f
 ### 8. Word budget: 110–185 target, hard ceiling 210
 
 v6 targeted 180–240; the oversized-box and weak-grip failures showed the tail sections were being under-weighted. v7 is tighter because the model executes short instructions better:
-- 110–185 words = high signal, every command lands
-- 210+ words = dilution returns
+- 110–185 words = high signal, every command lands (140–200 when Picture 3 is present; its ceiling is 230)
+- past the ceiling = dilution returns
 - The EDIT section carries placement+scale+hold+re-pose and must stay within its 35–75 word budget — if you exceed the total, trim PRODUCT graphics and LIGHTING first, NEVER the scale anchor, the hold, or the re-pose.
+- **`word_count` must be the REAL count of the words you wrote — count them; never copy a number from the calibration examples.** Exceeding the ceiling is a hard failure even if everything else is right: cut until you fit.
 
 ---
 
@@ -167,6 +170,7 @@ v6 targeted 180–240; the oversized-box and weak-grip failures showed the tail 
 - Product/brand text WITHOUT quote marks (always quote)
 - Weight-loss claims, percentages, prescription comparisons
 - Needles, injections, doctor/pharmacy framing, before/after framing
+- The words "injection", "needle", "syringe" ANYWHERE — including when describing the box's own printed graphics. A printed device inset is "a photographic inset of the white-and-red pen device", never "injection pen"
 
 ### Vague language
 - "naturally", "elegantly", "effortlessly" as standalone descriptors

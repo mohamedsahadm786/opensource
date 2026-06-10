@@ -163,6 +163,8 @@ def parse_json(text: str) -> dict:
     for k in ("step_1_image_prompt", "fal_pulid_params"):
         if not obj.get(k):
             raise ValueError(f"model output missing required key: {k}")
+    # LLMs can't count their own words — replace the claimed word_count with the truth
+    obj["word_count"] = len(str(obj["step_1_image_prompt"]).split())
     return obj
 
 
