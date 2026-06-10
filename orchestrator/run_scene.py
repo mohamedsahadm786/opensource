@@ -101,17 +101,46 @@ def _gender_key(gender: str | None) -> str:
     return "male" if g.startswith("m") else "female"
 
 
+def _persona_build_block(appearance_spec: dict) -> str:
+    """The persona's locked BODY BUILD from Phase A (identity.body_type etc.).
+    prompt_descriptors are face-only, so without this the build never reaches
+    Step 1 and FLUX defaults to a slim/fit body. Empty when the spec has no
+    body_type (pre-fix personas) -> the user message is unchanged."""
+    ident = (appearance_spec or {}).get("identity") or {}
+    body_type = str(ident.get("body_type") or "").strip()
+    if not body_type:
+        return ""
+    lines = [f"body_type: {body_type}"]
+    props = ident.get("body_proportions") or []
+    if isinstance(props, list) and props:
+        lines.append("build: " + "; ".join(str(p) for p in props[:4]))
+    height = str(ident.get("height_impression") or "").strip()
+    if height:
+        lines.append(f"height_impression: {height}")
+    return "\n".join(lines)
+
+
 def build_user_message(persona: dict, gender: str, scenario_spec: dict) -> str:
-    descriptors = (json.loads(persona["appearance_spec"]) or {}).get("prompt_descriptors") or {}
+    appearance_spec = json.loads(persona["appearance_spec"]) or {}
+    descriptors = appearance_spec.get("prompt_descriptors") or {}
+    build_block = _persona_build_block(appearance_spec)
     # resolve the gendered outfit so the model gets the exact outfit string
     spec = dict(scenario_spec)
     outfit = spec.get("outfit")
     if isinstance(outfit, dict):
         spec["outfit"] = outfit.get(_gender_key(gender)) or next(iter(outfit.values()), "")
-    return "\n".join([
+    parts = [
         "=== PERSONA prompt_descriptors (COPY THE CHOSEN LINES VERBATIM) ===",
         json.dumps(descriptors, indent=2, ensure_ascii=False),
         "",
+    ]
+    if build_block:
+        parts += [
+            "=== PERSONA BUILD (AUTHORITATIVE locked body type — weave into sentence 1 per the system prompt; never override it, even in athletic scenarios) ===",
+            build_block,
+            "",
+        ]
+    parts += [
         f"=== PERSONA gender === {gender}",
         "",
         "=== SCENARIO (build the Step-1 scene from this; outfit already resolved to gender) ===",
@@ -119,7 +148,8 @@ def build_user_message(persona: dict, gender: str, scenario_spec: dict) -> str:
         "",
         "=== TASK ===",
         "Output exactly ONE Step-1 JSON envelope per the system prompt. JSON only, no fences, no preamble.",
-    ])
+    ]
+    return "\n".join(parts)
 
 
 def parse_json(text: str) -> dict:

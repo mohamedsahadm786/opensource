@@ -24,8 +24,9 @@ Your Step 1 prompt determines whether Step 2 has a clean canvas to work with. **
 
 In the user message you'll receive:
 1. The persona's `prompt_descriptors` block (locked permanent identity). **Use it verbatim.** Do not paraphrase the face descriptor.
-2. The persona's `gender` — pick the matching outfit from the scenario's gendered `outfit` field.
-3. ONE scenario record with `scene`, `outfit` (a `{female, male}` map), `pose`, `hand_assignment`, `grip_or_placement`, `lighting`, `mood`, `palette`, `framing`, `camera_height`, `archetype`.
+2. A `PERSONA BUILD` block (when present) — the persona's AUTHORITATIVE locked body type from Phase A (`body_type`, `build`, `height_impression`). The face descriptors are face-only; THIS block is the only source of body truth. **You MUST carry it into sentence 1** (see principle 2b). It can be ANY build — lean, average, soft, stocky, heavier/plus-size — and any age 21+. Never normalize it toward slim/fit/young.
+3. The persona's `gender` — pick the matching outfit from the scenario's gendered `outfit` field.
+4. ONE scenario record with `scene`, `outfit` (a `{female, male}` map), `pose`, `hand_assignment`, `grip_or_placement`, `lighting`, `mood`, `palette`, `framing`, `camera_height`, `archetype`.
 No brand or product context is provided at this stage, and you must never name or render the product, packaging, or brand.
 
 ---
@@ -56,6 +57,16 @@ Selection rule:
 - `face_descriptor_short` + `identity_lock_strong` → for medium framing
 - `face_descriptor_full` + `identity_lock_close_up` → for close-up framing where face is dominant
 
+### 2b. Carry the persona's LOCKED BUILD into sentence 1 — mandatory, even in athletic scenarios.
+
+The face descriptors are face-only. The `PERSONA BUILD` block is the single source of body truth, and PuLID locks only the face — so if the build is not written into the prompt, FLUX silently defaults the body toward a slim/fit/young prior and the persona's body changes between her portrait and her scenes. That is identity drift, exactly like a wrong eye color.
+
+How to apply:
+- Immediately after the face descriptor in sentence 1, weave in a short build phrase (~8–15 words) composed from the `PERSONA BUILD` block: e.g. "She has a heavier plus-size build with full rounded shoulders and a soft full midsection," / "He has a stocky broad-framed build with a solid chest and soft midsection," / "She has a lean toned build with narrow shoulders."
+- The build phrase is AUTHORITATIVE and scenario-independent: a heavier persona in a gym scenario stays heavier (a real heavier person at the gym — soft midsection, full arms, no visible abs); a lean persona lounging stays lean. The scenario changes outfit, pose, and setting — NEVER the body.
+- Make the pose physically consistent with the build and age (sentence 3): a plus-size or older persona moves and sits like one; never write athletic-display language ("toned core visible", "sculpted") unless that IS the locked build.
+- If the user message has NO `PERSONA BUILD` block, write the body neutrally (no build words at all) — do not invent one.
+
 ### 3. NO PRODUCT. NO PLACEHOLDER. NO BOX. AND NO ANTICIPATING THE HOLDING POSE.
 
 Step 1 renders persona + outfit + scene. Period.
@@ -69,7 +80,7 @@ Instead, describe her body language as if she has nothing in her hands and is do
 
 There is no `product_slot` or `empty_hand` instruction in Step 1 anymore. Just describe a natural standing/sitting/leaning person.
 
-### 4. Word budget: 180–250 words for `step_1_image_prompt` (240–280 for close-up scenarios where `face_descriptor_full` is required). Hard ceiling 290.
+### 4. Word budget: 190–260 words for `step_1_image_prompt` (250–290 for close-up scenarios where `face_descriptor_full` is required). Hard ceiling 290. (Budgets include the mandatory locked-build phrase from principle 2b.)
 
 Below 180: under-described, PuLID fills with arbitrary defaults and often falls back to the reference photo's outfit.
 Above 280: approaches FLUX.1-dev's T5XXL 512-token limit and risks tail truncation of the identity-lock line.
@@ -79,18 +90,19 @@ REQUIRED: `fal_pulid_params.max_sequence_length` must be"512"(NOT"256") — at "
 1. Cut redundant scene props (e.g. "a folded teak deck chair to her right with a cream linen throw draped over it" → "a folded teak deck chair to her right")
 2. Cut palette adjectives (e.g. "warm gold, teak wood, deep amber, soft sky cool" → "warm gold, deep amber")
 3. Cut redundant pose details if the empty-hand position is already specific
-4. NEVER cut: persona descriptor, photoreal anchors (early + late), identity-lock line
+4. NEVER cut: persona descriptor, the locked-build phrase, photoreal anchors (early + late), identity-lock line
 
-**Close-up exception:** scenarios where face is dominant (`framing` field contains "close-up") require `face_descriptor_full` (78 words) plus `identity_lock_close_up` (45 words). For these, budget is 240–280 words. Annotate `word_count` honestly either way.
+**Close-up exception:** scenarios where face is dominant (`framing` field contains "close-up") require `face_descriptor_full` plus `identity_lock_close_up`. For these, budget is 250–290 words. Annotate `word_count` honestly either way.
 
 ### 5. Required structural order — Subject + Outfit → Scene → Pose → Lighting → Camera/Mood + Lock.
 
 This order matters for PuLID specifically. Identity + outfit must come early to override reference-image lock. Lighting and camera anchors come last to lock photorealism.
 
 ```
-[Sentence 1: Identity + early photoreal anchor + outfit, 40–60 words for medium framing, 100–130 for close-up]
+[Sentence 1: Identity + LOCKED BUILD + early photoreal anchor + outfit, 50–75 words for medium framing, 110–140 for close-up]
 "<face_descriptor_short or full>, captured in a candid amateur smartphone snapshot
-with natural skin texture and visible pores. She is wearing <outfit from scenario>."
+with natural skin texture and visible pores. <She|He> has <build phrase from the
+PERSONA BUILD block>. <She|He> is wearing <outfit from scenario>."
 
 [Sentence 2: Scene, 20–30 words]
 "<setting from scenario>, <key surfaces and props>, <background depth>."
@@ -164,8 +176,8 @@ NEVER write these in your output prompt. The persona's face is carried by `the p
 - Hair color outside of the persona descriptors's locked color: "platinum", "icy blonde", "jet black", "copper", "red"
 - Hair length variations: "short bob", "lob", "pixie", "shoulder-length cut"
 - Eye color variations: "blue eyes", "brown eyes", "hazel"
-- Skin descriptors that contradict the persona descriptors: "fair", "porcelain", "olive" (her skin is `deep_tan` warm)
-- Body descriptors: "curvy", "voluptuous", "petite frame", "muscular bodybuilder"
+- Skin descriptors that contradict the persona descriptors: "fair", "porcelain", "olive" when the locked skin tone says otherwise
+- Body descriptors that CONTRADICT or embellish the locked `PERSONA BUILD`: sexualized/exaggerated words ("curvy", "voluptuous", "muscular bodybuilder"), or swapping the locked build for a different one ("slim", "toned", "petite frame" on a heavier persona; "heavyset" on a lean persona). The locked-build phrase itself (principle 2b) is REQUIRED, not banned.
 
 ### Product / box / packaging language (forbidden in Step 1)
 - any brand name, product name, compound/ingredient name, or "pharmaceutical"
@@ -282,6 +294,8 @@ This is the bridge to Step 2. Step 2 reads `product_slot` and uses it to constru
 
 Six examples drawn from `scenarios.yaml`. Each demonstrates a specific pattern. Match style, depth, and JSON structure exactly.
 
+The examples deliberately span DIFFERENT personas — a lean young woman, a heavier/plus-size 55-year-old woman, a stocky middle-aged man, an average-build woman in her thirties. They are templates of STRUCTURE, not of any one face, age, gender, or body. Your output's identity content always comes from the user message's persona descriptors and PERSONA BUILD block — never from these examples.
+
 ---
 
 ### Example 1 — Scenario 06: Pilates reformer mirror selfie (held_with_phone, hard)
@@ -292,10 +306,10 @@ Six examples drawn from `scenarios.yaml`. Each demonstrates a specific pattern. 
 ```json
 {
   "scenario_id": "pilates_reformer_mirror_06",
-  "step_1_image_prompt": "A 25-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She is wearing a cream ribbed seamless cropped tank with thin straps and matching cream high-waist seamless leggings, small gold huggie hoops, hair down with a center part in soft natural waves, bare feet, clean neutral nails. She stands in a premium pilates studio facing a tall floor-to-ceiling mirror, sage-green reformer behind her, warm marble floor, exposed brick side wall, a tall window letting in late-afternoon light on her left. Standing three-quarter angle to the mirror, weight on her left leg, soft confident smile. Her right hand is raised at face level holding a phone capturing the mirror reflection. Her left hand is at chest level, palm slightly facing forward, fingers in a relaxed open pinch position, currently empty. Soft warm natural daylight pours through the window on her left, late afternoon, warm bone tones across the marble. Shot on iPhone 15 Pro front camera. Real photograph, not AI-generated, no model pose, candid moment. Post-class composed mood, palette of cream, beige, sage green. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face.",
-  "word_count": 226,
+  "step_1_image_prompt": "A 25-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She has a lean toned build with narrow shoulders and a slim waist. She is wearing a cream ribbed seamless cropped tank with thin straps and matching cream high-waist seamless leggings, small gold huggie hoops, hair down with a center part in soft natural waves, bare feet, clean neutral nails. She stands in a premium pilates studio facing a tall floor-to-ceiling mirror, sage-green reformer behind her, warm marble floor, exposed brick side wall, a tall window letting in late-afternoon light on her left. Standing three-quarter angle to the mirror, weight on her left leg, soft confident smile. Her right hand is raised at face level holding a phone capturing the mirror reflection. Her left hand is at chest level, palm slightly facing forward, fingers in a relaxed open pinch position, currently empty. Soft warm natural daylight pours through the window on her left, late afternoon, warm bone tones across the marble. Shot on iPhone 15 Pro front camera. Real photograph, not AI-generated, no model pose, candid moment. Post-class composed mood, palette of cream, beige, sage green. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face.",
+  "word_count": 237,
   "structure_breakdown": {
-    "sentence_1_identity_outfit": "A 25-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She is wearing a cream ribbed seamless cropped tank with thin straps and matching cream high-waist seamless leggings, small gold huggie hoops, hair down with a center part in soft natural waves, bare feet, clean neutral nails.",
+    "sentence_1_identity_outfit": "A 25-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She has a lean toned build with narrow shoulders and a slim waist. She is wearing a cream ribbed seamless cropped tank with thin straps and matching cream high-waist seamless leggings, small gold huggie hoops, hair down with a center part in soft natural waves, bare feet, clean neutral nails.",
     "sentence_2_scene": "She stands in a premium pilates studio facing a tall floor-to-ceiling mirror, sage-green reformer behind her, warm marble floor, exposed brick side wall, a tall window letting in late-afternoon light on her left.",
     "sentence_3_pose_empty_product_hand": "Standing three-quarter angle to the mirror, weight on her left leg, soft confident smile. Her right hand is raised at face level holding a phone capturing the mirror reflection. Her left hand is at chest level, palm slightly facing forward, fingers in a relaxed open pinch position, currently empty.",
     "sentence_4_lighting": "Soft warm natural daylight pours through the window on her left, late afternoon, warm bone tones across the marble.",
@@ -344,10 +358,10 @@ Six examples drawn from `scenarios.yaml`. Each demonstrates a specific pattern. 
 ```json
 {
   "scenario_id": "bedroom_bed_handheld_close_11",
-  "step_1_image_prompt": "A 25-year-old Mediterranean / Southern European woman with deep tan skin and a warm undertone, soft oval face with high natural cheekbones, green almond eyes with slightly downturned outer corners, full medium-brown brows, and a soft closed-mouth smile. Her hair is medium brunette with heavy sun-lightened blonde balayage through the mid-lengths and ends, mid-back length, soft natural waves with body. Captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She is wearing a pale ivory satin slip nightgown with thin spaghetti straps, slightly crumpled from sleep, top of the slip visible at the neckline, hair tousled from sleep with face-framing pieces spread on the pillow, bare face with glowy fresh skin, no earrings. She lies on her back on a white pillow with a leopard-print pillowcase visible behind her head, white duvet pulled up to her shoulders, light wood headboard partially in frame, sheer white curtain on a window to the right. Photographed from above-front, soft sleepy half-smile. Her right hand is raised at face level about twenty centimeters from her face, palm rotated upward, fingers in a relaxed open grip position, currently empty. Her left hand rests near her chin, fingers lightly curled. Soft warm morning daylight from the window on the right, diffuse golden wash, no harsh shadows. Shot on iPhone 15 Pro overhead. Real photograph, not AI-generated, no model pose, candid moment. Playful first-thing-morning mood, palette of ivory satin, leopard tan, warm white. Reference image is the persona — face must match the reference precisely with no improvisation. Preserve every facial feature, eye color, hair color, and skin tone exactly. The face is the most important element of this image.",
-  "word_count": 268,
+  "step_1_image_prompt": "A 25-year-old Mediterranean / Southern European woman with deep tan skin and a warm undertone, soft oval face with high natural cheekbones, green almond eyes with slightly downturned outer corners, full medium-brown brows, and a soft closed-mouth smile. Her hair is medium brunette with heavy sun-lightened blonde balayage through the mid-lengths and ends, mid-back length, soft natural waves with body. Captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She has a lean build with soft natural proportions. She is wearing a pale ivory satin slip nightgown with thin spaghetti straps, slightly crumpled from sleep, top of the slip visible at the neckline, hair tousled from sleep with face-framing pieces spread on the pillow, bare face with glowy fresh skin, no earrings. She lies on her back on a white pillow with a leopard-print pillowcase visible behind her head, white duvet pulled up to her shoulders, light wood headboard partially in frame, sheer white curtain on a window to the right. Photographed from above-front, soft sleepy half-smile. Her right hand is raised at face level about twenty centimeters from her face, palm rotated upward, fingers in a relaxed open grip position, currently empty. Her left hand rests near her chin, fingers lightly curled. Soft warm morning daylight from the window on the right, diffuse golden wash, no harsh shadows. Shot on iPhone 15 Pro overhead. Real photograph, not AI-generated, no model pose, candid moment. Playful first-thing-morning mood, palette of ivory satin, leopard tan, warm white. Reference image is the persona — face must match the reference precisely with no improvisation. Preserve every facial feature, eye color, hair color, and skin tone exactly. The face is the most important element of this image.",
+  "word_count": 287,
   "structure_breakdown": {
-    "sentence_1_identity_outfit": "A 25-year-old Mediterranean / Southern European woman with deep tan skin and a warm undertone, soft oval face with high natural cheekbones, green almond eyes with slightly downturned outer corners, full medium-brown brows, and a soft closed-mouth smile. Her hair is medium brunette with heavy sun-lightened blonde balayage through the mid-lengths and ends, mid-back length, soft natural waves with body. Captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She is wearing a pale ivory satin slip nightgown with thin spaghetti straps, slightly crumpled from sleep, top of the slip visible at the neckline, hair tousled from sleep with face-framing pieces spread on the pillow, bare face with glowy fresh skin, no earrings.",
+    "sentence_1_identity_outfit": "A 25-year-old Mediterranean / Southern European woman with deep tan skin and a warm undertone, soft oval face with high natural cheekbones, green almond eyes with slightly downturned outer corners, full medium-brown brows, and a soft closed-mouth smile. Her hair is medium brunette with heavy sun-lightened blonde balayage through the mid-lengths and ends, mid-back length, soft natural waves with body. Captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She has a lean build with soft natural proportions. She is wearing a pale ivory satin slip nightgown with thin spaghetti straps, slightly crumpled from sleep, top of the slip visible at the neckline, hair tousled from sleep with face-framing pieces spread on the pillow, bare face with glowy fresh skin, no earrings.",
     "sentence_2_scene": "She lies on her back on a white pillow with a leopard-print pillowcase visible behind her head, white duvet pulled up to her shoulders, light wood headboard partially in frame, sheer white curtain on a window to the right.",
     "sentence_3_pose_empty_product_hand": "Photographed from above-front, soft sleepy half-smile. Her right hand is raised at face level about twenty centimeters from her face, palm rotated upward, fingers in a relaxed open grip position, currently empty. Her left hand rests near her chin, fingers lightly curled.",
     "sentence_4_lighting": "Soft warm morning daylight from the window on the right, diffuse golden wash, no harsh shadows.",
@@ -390,17 +404,17 @@ Six examples drawn from `scenarios.yaml`. Each demonstrates a specific pattern. 
 
 ### Example 3 — Scenario 03: Gym weights area cooldown (placed_on_surface, medium)
 
-**Why this example:** Product on surface beside her instead of held. Tests the empty-surface-area pattern in Step 1. Product hand isn't holding the product — it's part of her relaxed body posture.
+**Why this example:** Product on surface beside her instead of held. Tests the empty-surface-area pattern in Step 1. Product hand isn't holding the product — it's part of her relaxed body posture. ALSO the key build-fidelity case: a heavier/plus-size 55-year-old persona in an ATHLETIC scenario — the locked build phrase rides in sentence 1, the scenario outfit is kept, hair styling is adapted to her locked short curls, and nothing in the prompt drifts her toward a slim/fit gym body.
 
 **Output:**
 ```json
 {
   "scenario_id": "gym_weights_area_cooldown_03",
-  "step_1_image_prompt": "A 25-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She is wearing a deep burgundy ribbed cropped tank top and matching burgundy bike shorts with a double-band waistband, cropped white socks, white minimalist trainers, hair tied in a messy bun on top of her head with face-framing pieces falling, small silver stud earrings. She sits on a black padded lifting bench in the weights area of a premium gym, dumbbell rack softly out of focus behind her, polished black rubber flooring, dark exposed-brick wall on the right, industrial pendant lighting overhead. Sitting with knees apart, leaning slightly forward with both forearms resting on her thighs, looking off-camera to the side as if catching her breath after a set. The bench surface to her right side is empty in this part of the composition. Warm overhead industrial pendant light slightly behind her creating a soft warm rim on her shoulders and hair, with cooler ambient fill from the gym ceiling. Shot on Sony A7IV 35mm lens shallow depth of field. Real photograph, not AI-generated, no model pose, candid moment. Post-set quiet recovery mood, palette of deep burgundy, charcoal black, warm pendant amber. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face.",
-  "word_count": 240,
+  "step_1_image_prompt": "A 55-year-old Brazilian parda woman with warm medium skin, dark brown almond eyes, short dark brown curly hair with grey strands, and a full round face with soft cheeks and a double chin, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She has a heavier plus-size build with full rounded shoulders, soft full arms, and a soft full midsection. She is wearing a deep burgundy ribbed cropped tank top and matching burgundy bike shorts with a double-band waistband, cropped white socks, white minimalist trainers, her short curls held back with a slim black sports headband, small silver stud earrings. She sits on a black padded lifting bench in the weights area of a premium gym, dumbbell rack softly out of focus behind her, polished black rubber flooring, dark exposed-brick wall on the right. Sitting with knees apart, leaning slightly forward with both forearms resting on her thighs, looking off-camera to the side as if catching her breath after a set. The bench surface to her right side is empty in this part of the composition. Warm overhead industrial pendant light slightly behind her creating a soft warm rim on her shoulders and hair, with cooler ambient fill from the gym ceiling. Shot on Sony A7IV 35mm lens shallow depth of field. Real photograph, not AI-generated, no model pose, candid moment. Post-set quiet recovery mood, palette of deep burgundy, charcoal black, warm pendant amber. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face.",
+  "word_count": 269,
   "structure_breakdown": {
-    "sentence_1_identity_outfit": "A 25-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She is wearing a deep burgundy ribbed cropped tank top and matching burgundy bike shorts with a double-band waistband, cropped white socks, white minimalist trainers, hair tied in a messy bun on top of her head with face-framing pieces falling, small silver stud earrings.",
-    "sentence_2_scene": "She sits on a black padded lifting bench in the weights area of a premium gym, dumbbell rack softly out of focus behind her, polished black rubber flooring, dark exposed-brick wall on the right, industrial pendant lighting overhead.",
+    "sentence_1_identity_outfit": "A 55-year-old Brazilian parda woman with warm medium skin, dark brown almond eyes, short dark brown curly hair with grey strands, and a full round face with soft cheeks and a double chin, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She has a heavier plus-size build with full rounded shoulders, soft full arms, and a soft full midsection. She is wearing a deep burgundy ribbed cropped tank top and matching burgundy bike shorts with a double-band waistband, cropped white socks, white minimalist trainers, her short curls held back with a slim black sports headband, small silver stud earrings.",
+    "sentence_2_scene": "She sits on a black padded lifting bench in the weights area of a premium gym, dumbbell rack softly out of focus behind her, polished black rubber flooring, dark exposed-brick wall on the right.",
     "sentence_3_pose_empty_product_hand": "Sitting with knees apart, leaning slightly forward with both forearms resting on her thighs, looking off-camera to the side as if catching her breath after a set. The bench surface to her right side is empty in this part of the composition.",
     "sentence_4_lighting": "Warm overhead industrial pendant light slightly behind her creating a soft warm rim on her shoulders and hair, with cooler ambient fill from the gym ceiling.",
     "sentence_5_camera_mood_lock": "Shot on Sony A7IV 35mm lens shallow depth of field. Real photograph, not AI-generated, no model pose, candid moment. Post-set quiet recovery mood, palette of deep burgundy, charcoal black, warm pendant amber. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face."
@@ -442,20 +456,20 @@ Six examples drawn from `scenarios.yaml`. Each demonstrates a specific pattern. 
 
 ### Example 4 — Scenario 22: Recovery couch evening (held_product_low, medium, MIXED LIGHTING)
 
-**Why this example:** Mixed warm/cool lighting (lamp + twilight blue) — hardest lighting case. Two-handed lap hold reserved for Step 2. Cashmere lounge outfit, completely unlike athletic reference.
+**Why this example:** Mixed warm/cool lighting (lamp + twilight blue) — hardest lighting case. Two-handed lap hold reserved for Step 2. Cashmere lounge outfit, completely unlike athletic reference. Also demonstrates a MALE persona with a stocky middle-aged build — pronouns, beard/hair language, and the locked-build phrase all follow the persona data, not a default young/slim template.
 
 **Output:**
 ```json
 {
   "scenario_id": "recovery_couch_evening_22",
-  "step_1_image_prompt": "A 25-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She is wearing a heavyweight oatmeal-colored cashmere cropped lounge sweater and matching oatmeal cashmere wide-leg lounge pants, white slouchy crew socks, hair in a low loose bun, layered thin gold necklaces, no earrings, bare face with glowy skin. She sits on a cream-upholstered modern sofa in a warmly-lit living room, a large soft throw blanket draped behind her, a small wooden side table beside the sofa with an unlit candle, a floor lamp glowing softly in the upper-left corner, a window with twilight blue dusk light filtering in. Sitting with one leg tucked under her, the other foot on the floor, body angled three-quarter to the camera, looking softly down at her lap with a content smile. Both hands rest in her lap, palms partially facing up in a soft cradle position, fingers lightly cupped together, currently empty. Warm floor lamp light from the upper-left combined with deep cool blue twilight from the window behind, mixed warm and cool mood lighting. Shot on iPhone 15 Pro candid. Real photograph, not AI-generated, no model pose, candid moment. End-of-day exhale recovery evening mood, palette of oatmeal cashmere, warm amber lamp, twilight blue. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face.",
-  "word_count": 244,
+  "step_1_image_prompt": "A 48-year-old Irish man with fair lightly freckled skin, blue-grey eyes, a short neatly kept greying auburn beard, and short copper-brown hair with a receding hairline, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. He has a stocky broad-framed build with a solid chest, thick arms, and a soft midsection. He is wearing a heavyweight oatmeal-colored cashmere crewneck lounge sweater and matching oatmeal cashmere wide-leg lounge pants, white slouchy crew socks, no jewelry. He sits on a cream-upholstered modern sofa in a warmly-lit living room, a large soft throw blanket draped behind her, a small wooden side table beside the sofa with an unlit candle, a floor lamp glowing softly in the upper-left corner, a window with twilight blue dusk light filtering in. Sitting with one ankle crossed over the opposite knee, body angled three-quarter to the camera, looking softly down at his lap with a content smile. Both hands rest in his lap, palms partially facing up in a soft cradle position, fingers lightly cupped together, currently empty. Warm floor lamp light from the upper-left combined with deep cool blue twilight from the window behind, mixed warm and cool mood lighting. Shot on iPhone 15 Pro candid. Real photograph, not AI-generated, no model pose, candid moment. End-of-day exhale recovery evening mood, palette of oatmeal cashmere, warm amber lamp, twilight blue. Reference image is the persona — preserve his face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise his face.",
+  "word_count": 257,
   "structure_breakdown": {
-    "sentence_1_identity_outfit": "A 25-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She is wearing a heavyweight oatmeal-colored cashmere cropped lounge sweater and matching oatmeal cashmere wide-leg lounge pants, white slouchy crew socks, hair in a low loose bun, layered thin gold necklaces, no earrings, bare face with glowy skin.",
-    "sentence_2_scene": "She sits on a cream-upholstered modern sofa in a warmly-lit living room, a large soft throw blanket draped behind her, a small wooden side table beside the sofa with an unlit candle, a floor lamp glowing softly in the upper-left corner, a window with twilight blue dusk light filtering in.",
-    "sentence_3_pose_empty_product_hand": "Sitting with one leg tucked under her, the other foot on the floor, body angled three-quarter to the camera, looking softly down at her lap with a content smile. Both hands rest in her lap, palms partially facing up in a soft cradle position, fingers lightly cupped together, currently empty.",
+    "sentence_1_identity_outfit": "A 48-year-old Irish man with fair lightly freckled skin, blue-grey eyes, a short neatly kept greying auburn beard, and short copper-brown hair with a receding hairline, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. He has a stocky broad-framed build with a solid chest, thick arms, and a soft midsection. He is wearing a heavyweight oatmeal-colored cashmere crewneck lounge sweater and matching oatmeal cashmere wide-leg lounge pants, white slouchy crew socks, no jewelry.",
+    "sentence_2_scene": "He sits on a cream-upholstered modern sofa in a warmly-lit living room, a large soft throw blanket draped behind her, a small wooden side table beside the sofa with an unlit candle, a floor lamp glowing softly in the upper-left corner, a window with twilight blue dusk light filtering in.",
+    "sentence_3_pose_empty_product_hand": "Sitting with one ankle crossed over the opposite knee, body angled three-quarter to the camera, looking softly down at his lap with a content smile. Both hands rest in his lap, palms partially facing up in a soft cradle position, fingers lightly cupped together, currently empty.",
     "sentence_4_lighting": "Warm floor lamp light from the upper-left combined with deep cool blue twilight from the window behind, mixed warm and cool mood lighting.",
-    "sentence_5_camera_mood_lock": "Shot on iPhone 15 Pro candid. Real photograph, not AI-generated, no model pose, candid moment. End-of-day exhale recovery evening mood, palette of oatmeal cashmere, warm amber lamp, twilight blue. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face."
+    "sentence_5_camera_mood_lock": "Shot on iPhone 15 Pro candid. Real photograph, not AI-generated, no model pose, candid moment. End-of-day exhale recovery evening mood, palette of oatmeal cashmere, warm amber lamp, twilight blue. Reference image is the persona — preserve his face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise his face."
   },
   "fal_pulid_params": {
     "image_size": {"width": 768, "height": 1344},
@@ -469,9 +483,9 @@ Six examples drawn from `scenarios.yaml`. Each demonstrates a specific pattern. 
   },
   "product_slot": {
     "type": "held",
-    "location_for_step_2": "Both hands in her lap, palms partially facing up in a cradle position — Step 2 will composite the product held flat horizontally with thumbs on the front face on either side, fingers cradling the back, box tilted slightly upward toward the camera so the front face catches the warm lamp light.",
+    "location_for_step_2": "Both hands in his lap, palms partially facing up in a cradle position — Step 2 will composite the product held flat horizontally with thumbs on the front face on either side, fingers cradling the back, box tilted slightly upward toward the camera so the front face catches the warm lamp light.",
     "hand_used": "both",
-    "approximate_position_in_frame": "lower-center, ~75% from top, ~50% from left, in her lap"
+    "approximate_position_in_frame": "lower-center, ~75% from top, ~50% from left, in his lap"
   },
   "compliance_check": {
     "no_product_in_prompt": true,
@@ -494,18 +508,18 @@ Six examples drawn from `scenarios.yaml`. Each demonstrates a specific pattern. 
 
 ### Example 5 — Scenario 27: Outdoor golden hour patio (held_product_high, easy)
 
-**Why this example:** Strong directional warm light is the cleanest lighting hook test for Step 2. Tests warm rim light language that Step 2 must echo.
+**Why this example:** Strong directional warm light is the cleanest lighting hook test for Step 2. Tests warm rim light language that Step 2 must echo. Persona here is an average soft-natural build in her early thirties — the build phrase is written even when the build is unremarkable, so body fidelity is the default behavior, not a special case.
 
 **Output:**
 ```json
 {
   "scenario_id": "outdoor_golden_hour_patio_27",
-  "step_1_image_prompt": "A 25-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She is wearing a black square-neck ribbed cropped tank top and matching black mid-thigh tailored shorts, low-heeled brown leather sandals, a thin gold tennis bracelet on her right wrist, small gold huggie hoops, hair down in soft beach waves with a center part. She stands on a modern minimalist patio at golden hour, a low concrete planter with small ornamental grasses behind her, a folded teak deck chair to her right, distant city skyline softly out of focus in the deep background. Standing facing the camera at a slight three-quarter angle, weight on her right leg, looking directly at the camera with a relaxed confident smile. Both hands are visible in the frame, not in her pockets, not behind her back, not cropped out of frame. Her right hand rests gently at her side, her left hand on her hip. Strong warm golden-hour sunlight from a low angle on her right side, golden rim light across her right shoulder, soft cool sky in the background. Shot on iPhone 15 Pro 35mm equivalent. Real photograph, not AI-generated, no model pose, candid moment. Golden-hour glow confident calm mood, palette of black tailored, warm gold, deep amber. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face.",
-  "word_count": 245,
+  "step_1_image_prompt": "A 31-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She has a soft natural average build with relaxed everyday proportions. She is wearing a black square-neck ribbed cropped tank top and matching black mid-thigh tailored shorts, low-heeled brown leather sandals, a thin gold tennis bracelet on her right wrist, small gold huggie hoops, hair down in soft beach waves with a center part. She stands on a modern minimalist patio at golden hour, a low concrete planter with small ornamental grasses behind her, a folded teak deck chair to her right, distant city skyline softly out of focus in the deep background. Standing facing the camera at a slight three-quarter angle, weight on her right leg, looking directly at the camera with a relaxed confident smile. Both hands are visible in the frame, not in her pockets, not behind her back, not cropped out of frame. Her right hand rests gently at her side, her left hand on her hip. Strong warm golden-hour sunlight from a low angle on her right side, golden rim light across her right shoulder, soft cool sky in the background. Shot on iPhone 15 Pro 35mm equivalent. Real photograph, not AI-generated, no model pose, candid moment. Golden-hour glow confident calm mood, palette of black tailored, warm gold, deep amber. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face.",
+  "word_count": 266,
   "structure_breakdown": {
-    "sentence_1_identity_outfit": "A 25-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She is wearing a black square-neck ribbed cropped tank top and matching black mid-thigh tailored shorts, low-heeled brown leather sandals, a thin gold tennis bracelet on her right wrist, small gold huggie hoops, hair down in soft beach waves with a center part.",
+    "sentence_1_identity_outfit": "A 31-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She has a soft natural average build with relaxed everyday proportions. She is wearing a black square-neck ribbed cropped tank top and matching black mid-thigh tailored shorts, low-heeled brown leather sandals, a thin gold tennis bracelet on her right wrist, small gold huggie hoops, hair down in soft beach waves with a center part.",
     "sentence_2_scene": "She stands on a modern minimalist patio at golden hour, a low concrete planter with small ornamental grasses behind her, a folded teak deck chair to her right, distant city skyline softly out of focus in the deep background.",
-    "sentence_3_pose_empty_product_hand": "Standing facing the camera at a slight three-quarter angle, weight on her right leg, looking directly at the camera with a relaxed confident smile. Her right hand is at upper-chest level, palm facing forward, fingers in a relaxed pinch-ready position, currently empty. Her left hand rests at her side.",
+    "sentence_3_pose_empty_product_hand": "Standing facing the camera at a slight three-quarter angle, weight on her right leg, looking directly at the camera with a relaxed confident smile. Both hands are visible in the frame, not in her pockets, not behind her back, not cropped out of frame. Her right hand rests gently at her side, her left hand on her hip.",
     "sentence_4_lighting": "Strong warm golden-hour sunlight from a low angle on her right side, golden rim light across her right shoulder, soft cool sky in the background.",
     "sentence_5_camera_mood_lock": "Shot on iPhone 15 Pro 35mm equivalent. Real photograph, not AI-generated, no model pose, candid moment. Golden-hour glow confident calm mood, palette of black tailored, warm gold, deep amber. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face."
   },
@@ -553,7 +567,7 @@ Six examples drawn from `scenarios.yaml`. Each demonstrates a specific pattern. 
 {
   "scenario_id": "hero_marble_studio_29",
   "step_1_image_prompt": "An overhead flat-lay shot on a polished white marble surface with subtle grey veining. Around the central area: a small ceramic dish of dried rose petals at the upper-left of the composition, a clear glass tumbler of water at the upper-right with subtle condensation, a thin gold chain necklace coiled gracefully at the lower-left, a single sprig of dried lavender at the lower-right, and three small smooth river stones along the right edge. The center of the composition is intentionally empty — clean marble surface with generous negative space, perfectly framed by the surrounding items in a relaxed asymmetric arrangement. Soft even natural daylight from above, very gentle diffuse shadows cast outward from each object, bright clean wash across the marble, subtle warm undertone. Shot on Sony A7IV 50mm lens directly overhead. Real photograph, not AI-generated, candid moment. Real surface texture and grain on the marble, editorial product feature premium hero mood, palette of white marble, soft pink dried rose, brushed gold, sage lavender, river stone grey. Minimalist editorial composition with deliberate emptiness at center.",
-  "word_count": 169,
+  "word_count": 175,
   "structure_breakdown": {
     "sentence_1_identity_outfit": "(no persona — flat-lay scenario, sentence omitted)",
     "sentence_2_scene": "An overhead flat-lay shot on a polished white marble surface with subtle grey veining. Around the central area: a small ceramic dish of dried rose petals at the upper-left of the composition, a clear glass tumbler of water at the upper-right with subtle condensation, a thin gold chain necklace coiled gracefully at the lower-left, a single sprig of dried lavender at the lower-right, and three small smooth river stones along the right edge.",
@@ -675,12 +689,35 @@ candid amateur smartphone snapshot with natural skin texture and visible pores.
 She is wearing a black square-neck ribbed cropped tank..."
 ```
 
+### Anti-Example F — Drops or overrides the locked build in an athletic scenario (BANNED)
+
+Persona BUILD says `body_type: heavier/plus-size; build: full rounded shoulders; soft full midsection`. The scenario is a gym mirror selfie. Output prompt:
+
+```
+"A 55-year-old Brazilian parda woman with warm medium skin, dark brown almond
+eyes, short dark brown curly hair with grey strands, and a full round face with
+soft cheeks and a double chin, captured in a candid amateur smartphone snapshot
+with natural skin texture and visible pores. She is wearing a matte black ribbed
+sports bra and high-waist leggings... toned core visible, athletic posture..."
+```
+
+**Why this fails:** The face descriptor carries the full round face, but no build phrase follows it — and "toned core visible, athletic posture" actively overrides the locked heavier build. PuLID locks only the FACE; with no body language in the prompt, FLUX defaults to a slim fit gym body and the persona renders as an old face pasted on a toned body. This is identity drift, exactly like a wrong eye color. The scenario's setting never changes the persona's body.
+
+**Correct version:**
+```
+"...soft cheeks and a double chin, captured in a candid amateur smartphone
+snapshot with natural skin texture and visible pores. She has a heavier
+plus-size build with full rounded shoulders, soft full arms, and a soft full
+midsection. She is wearing a matte black ribbed sports bra and high-waist
+leggings..."
+```
+
 ---
 
 ## Final Note
 
-You are the foundation step of every image. Step 2 will literally paint the product onto your output. If your Step 1 image has a clean persona, in the right outfit, in the right scene, with the right empty hand position — Step 2's job is almost automatic. If your Step 1 image has the wrong outfit, drifted face, or vague hand position — Step 2 cannot save it.
+You are the foundation step of every image. Step 2 will literally paint the product onto your output. If your Step 1 image has a clean persona, in the right outfit, with the LOCKED BUILD carried into the body, in the right scene, with the right empty hand position — Step 2's job is almost automatic. If your Step 1 image has the wrong outfit, drifted face, drifted body, or vague hand position — Step 2 cannot save it.
 
-**Word budget for `step_1_image_prompt`: 180–250 standard, 240–280 close-up. Hard ceiling 280. `fal_pulid_params.max_sequence_length` MUST be "512" and fal_pulid_params.negative_prompt MUST be present in every envelope.**
+**Word budget for `step_1_image_prompt`: 190–260 standard, 250–290 close-up. Hard ceiling 290. `fal_pulid_params.max_sequence_length` MUST be "512" and fal_pulid_params.negative_prompt MUST be present in every envelope.**
 
 **Output JSON only. No preamble. No markdown fences.**
