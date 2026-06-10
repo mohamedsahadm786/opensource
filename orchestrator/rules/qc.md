@@ -37,7 +37,7 @@ PRODUCT (judge the rendered product against the PRODUCT REFERENCE above):
 10. product_shape_broken: is the product warped, melted, or bent into an impossible shape vs the reference? Minor perspective/angle is FINE. (expected: false)
 11. product_text_legible: are the product's main / most-prominent text strings (the ones the reference marks as largest/most important) at least ~80% legible and recognisable — a viewer can clearly read them, even if a letter or two is slightly off? (expected: true)
 12. box_theme_ok: does the product match the reference's shape, colours and key graphics at roughly 80%+? Exact content not required. (expected: true)
-13. product_scale_wrong: is the product CLEARLY the wrong size relative to the person — e.g. a handheld box rendered wider than the forearm holding it, laptop-sized, or comically tiny? Judge against the person's hand/body in THIS image. A handheld product should read roughly palm-to-hand sized. Slightly large or small is FINE — only flag a blatant mismatch. (expected: false)
+13. product_scale_wrong: is the product CLEARLY the wrong size for what the reference says it is — e.g. rendered as wide as the person's shoulders, suitcase-sized, or so tiny its text could never read? Judge against the person's hands/body in THIS image and the product's described real size in the PRODUCT REFERENCE. A large product carton naturally spans a forearm/both hands; a small box sits in one palm. Slightly large or small is FINE — only flag a blatant mismatch. (expected: false)
 
 Then provide:
 - specific_issues: short list of ONLY the real defects found. Each item a SHORT imperative phrase (e.g. "doubled palm on the left hand", "extra hand-mass on the right wrist", "product text garbled"). Empty list if the image is acceptable.

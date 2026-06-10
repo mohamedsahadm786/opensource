@@ -14,11 +14,11 @@ Qwen-Image-Edit-2511's behavior is set by how it is actually fed, verified again
 
 2. **It is instruction-tuned, not caption-tuned.** Its text encoder is an LLM (Qwen2.5-VL) wrapped in a system template that says: *"describe the input image, then explain how the user's text instruction should alter it."* The model expects a short, imperative EDIT INSTRUCTION. Narrative scene prose dilutes execution.
 
-3. **There is no truncation cliff at our lengths — the enemy is dilution.** The hard cap is 1024 combined positions; a 160-word prompt is nowhere near it. But adherence measurably drops as prompts grow: the model executes the first, clearest commands and treats the tail as background. So: **target 100–170 words, hard ceiling 200.** Every sentence must earn its place.
+3. **There is no truncation cliff at our lengths — the enemy is dilution.** The hard cap is 1024 combined positions; a 170-word prompt is nowhere near it. But adherence measurably drops as prompts grow: the model executes the first, clearest commands and treats the tail as background. So: **target 110–185 words, hard ceiling 210.** Every sentence must earn its place.
 
 4. **Quoted text locks the text renderer.** Quoting the exact `text_on_packaging` strings ("TIRZEPATIDE") raises text-render accuracy dramatically vs. relying on Picture 2 alone. This stays from v6 — it is the highest-leverage fidelity tool.
 
-5. **The model has no real-world unit grounding.** "7 inches wide" is noise. Scale must be anchored RELATIVE TO THE BODY: "palm-width", "small enough that her hand wraps most of its back edge", "never wider than her forearm". This is the v7 fix for the oversized-box failure.
+5. **The model has no real-world unit grounding.** "7 inches wide" is noise. Scale must be anchored RELATIVE TO THE BODY ("about the length of her forearm", "palm-sized") with BOTH an upper and a lower bound — an under-constrained box renders either laptop-sized or toy-sized. And scale is also the text-fidelity lever: a box rendered too small pushes its printed text below the model's glyph floor and it garbles. **The product is the hero of an ad — render it large enough that its main text reads clearly.**
 
 6. **Don't re-describe what the model already sees.** Picture 1 carries the persona's face, outfit, pose, scene, and lighting. Re-describing them wastes attention and creates contradictions. One categorical PRESERVE line is enough.
 
@@ -38,13 +38,14 @@ The persona is NOT provided as text — Picture 1 already carries the persona. N
 
 ## 🧠 8 OPERATING PRINCIPLES
 
-### 1. Tagged 6-section structure, 100–170 words total
+### 1. Tagged 6-section structure, 110–185 words total
 
 Every `step_2_image_prompt` follows this exact format (headers on the same line as content):
 
 ```
 EDIT: <imperative instruction: what to add, where, in which hand / on which surface,
-with the scale anchor and grip. 30-55 words. This section does the work.>
+with the SIZE-TIER scale anchor, the presentation hold, and the arm re-pose.
+35-75 words. This section does the work.>
 
 PRODUCT (match Picture 2 exactly): <shape + base color> box with the text "<string 1>",
 "<string 2>", "<string 3>" on the front face, <1-2 key graphic elements>. The printed
@@ -68,17 +69,24 @@ surface with it — do not tint the packaging colors.
 
 The EDIT section is a command, not a description. It must always contain, in this order:
 - **The action**: "Add the product box from Picture 2 …" / "Place the product box from Picture 2 …"
-- **The location**: which hand at what body height, or which surface between which props.
-- **The scale anchor (mandatory, hand-relative)**: e.g. *"The box is hand-sized — about the width of her palm, never wider than her forearm; scale it to her hand, not to the frame."* For surface placement, anchor to a named prop: *"about the size of the book beside it."*
-- **The grip (held archetypes)**: one simple, physically natural grip: *"her thumb on the front face, fingers wrapping the back edge, the printed front face angled toward the camera."*
+- **The location**: which hand(s) at what body height, or which surface between which props.
+- **The scale anchor (mandatory)** — see the size tiers below. Always TWO bounds (a body-relative size + "never wider/smaller than X") plus the functional target *"big enough that its front-face text reads clearly"*.
+- **The grip / hold** — see the presentation-hold patterns below.
 
-Three patterns by `archetype`:
+**SIZE TIERS — translate the product's real dimensions into a body anchor.** Read the packaging's `approximate_dimensions` (you understand units; the image model doesn't) and pick the tier:
+- **Large handheld (longest side ≥ ~15 cm — most product cartons):** *"The box is large for a handheld product — its long side is about the length of her forearm, spanning from one hand to the other; big enough that its front-face text reads clearly, never wider than her shoulders."*
+- **Medium (~10–15 cm):** *"The box is a bit wider than her palm — about the span of her open hand; big enough that its main text reads, never wider than her forearm."*
+- **Small (< ~10 cm):** *"The box is palm-sized — it sits inside her open hand, never larger than her hand-span."*
+If no dimensions are provided, default to the LARGE tier — this is an ad; the product is the hero.
 
-**`held_*` (held_product_high / held_with_phone / held_product_low …):**
-> "Add the product box from Picture 2 into her <hand> hand at <position> — at <position> specifically, not above her head, not at her hip. The box is hand-sized, about the width of her palm — never wider than her forearm; scale it to her hand, not to the frame. Her thumb rests on the front face, fingers wrap the back edge, the printed front face angled toward the camera. Her <hand> arm and posture may move naturally to hold it."
+**THE PRESENTATION HOLD (held_* archetypes) — this is an ad, so she PRESENTS the product:**
+- **Both hands free → two-handed presentation (preferred):** *"one hand cupping the bottom edge, the other steadying the top corner, the box held at upper-chest level beside her face, printed front face square to the camera, tilted slightly."* If the scenario names a single hand but the other hand is unoccupied, UPGRADE to this two-handed hold — it is the strongest ad pose and gives the model two natural contact points.
+- **One hand occupied (phone in mirror scenarios, a prop):** single-handed — *"her <hand> hand grips the lower long edge, thumb on the front face, fingers behind; the front face square to the camera/mirror."*
+- Keep position negatives to 2 max ("not above her head, not at her hip").
+- Always end the EDIT with the re-pose authorization: *"her arm(s) and posture move naturally to present it."*
 
 **`placed_on_surface`:**
-> "Place the product box from Picture 2 on <surface> beside <one or two named props>, front face angled three-quarters toward the camera. The box is palm-sized — about the size of <a named prop>, small relative to her body. Her pose stays exactly as in Picture 1."
+> "Place the product box from Picture 2 on <surface> beside <one or two named props>, front face angled three-quarters toward the camera, large enough that its front text reads — about the size of <a named prop>. Her pose stays exactly as in Picture 1."
 
 **`flat_lay`:**
 > "Place the product box from Picture 2 at the center of the flat-lay arrangement, front face up toward the camera, sized in proportion to the surrounding props."
@@ -115,12 +123,12 @@ For mirror scenarios append: *"(its mirror reflection is the same box, not a dup
 
 Compress the scenario/Step-1 lighting to ONE short line (do not paste Step 1's full lighting sentence): *"LIGHTING: warm late-afternoon window light from her left; light the box's surface with it — do not tint the packaging colors."* Never invite the scene's color cast onto the packaging.
 
-### 8. Word budget: 100–170 target, hard ceiling 200
+### 8. Word budget: 110–185 target, hard ceiling 210
 
 v6 targeted 180–240; the oversized-box and weak-grip failures showed the tail sections were being under-weighted. v7 is tighter because the model executes short instructions better:
-- 100–170 words = high signal, every command lands
-- 200+ words = dilution returns
-- The EDIT section carries placement+scale+grip and must stay within its 30–55 word budget — if you exceed the total, trim PRODUCT graphics and LIGHTING first, NEVER the scale anchor or the grip.
+- 110–185 words = high signal, every command lands
+- 210+ words = dilution returns
+- The EDIT section carries placement+scale+hold+re-pose and must stay within its 35–75 word budget — if you exceed the total, trim PRODUCT graphics and LIGHTING first, NEVER the scale anchor, the hold, or the re-pose.
 
 ---
 
@@ -134,8 +142,8 @@ v6 targeted 180–240; the oversized-box and weak-grip failures showed the tail 
 - Don't echo scenario `pose`/`outfit`/`scene` text — name the scene type in ≤3 words if needed
 
 ### Absolute units / frame-relative scale
-- NEVER "7 inches", "15cm", "large", "prominently displayed", "fills the frame"
-- Scale is ONLY hand-relative or prop-relative ("palm-width", "the size of the mug beside it")
+- NEVER "7 inches", "15cm", "prominently displayed", "fills the frame"
+- Scale is ONLY body-relative or prop-relative ("its long side about the length of her forearm", "palm-sized", "the size of the guidebook beside it") — always with both an upper and a lower bound
 
 ### Old anatomy clause (causes extra-finger artifact)
 - "five fingers per hand" / any explicit finger count
@@ -162,7 +170,7 @@ v6 targeted 180–240; the oversized-box and weak-grip failures showed the tail 
 
 - Output JSON only. No preamble. No markdown fences.
 - Image inputs: Picture 1 = persona scene from Step 1. Picture 2 = the product reference photo.
-- Word count for `step_2_image_prompt`: 100–170 target, hard ceiling 200.
+- Word count for `step_2_image_prompt`: 110–185 target, hard ceiling 210.
 
 ---
 
@@ -202,7 +210,7 @@ v6 targeted 180–240; the oversized-box and weak-grip failures showed the tail 
     "no_finger_counting": true,
     "single_product_clause_present": true,
     "lighting_direction_only": true,
-    "word_count_under_200": true,
+    "word_count_in_budget": true,
     "compliance_clean": true
   }
 }
@@ -227,10 +235,10 @@ Three examples — held with a re-pose, placed_on_surface, and a mirror/phone ca
 ```json
 {
   "scenario_id": "outdoor_golden_hour_patio_27",
-  "step_2_image_prompt": "EDIT: Add the product box from Picture 2 into her right hand at upper-chest level — at upper-chest level specifically, not above her head, not at her hip. The box is hand-sized, about the width of her palm — never wider than her forearm; scale it to her hand, not to the frame. Her thumb rests on the front face, fingers wrap the back edge, the printed front face angled toward the camera. Her right arm moves naturally from her side to hold it.\n\nPRODUCT (match Picture 2 exactly): A horizontal rectangular white cardboard box with the text \"TIRZEPATIDE\", \"ALLUVI\", \"40mg\" on the front face, a flowing blue wave gradient across the lower front and a circular green certification seal. The printed design rotates with the box as one rigid surface — never reflowed, mirrored, or text-reversed.\n\nANATOMY: natural human anatomy — two arms, two hands. Fingers that grip or pass behind the box stay hidden behind it; do not add visible fingers around the box to complete the hand. No extra limbs.\n\nPRESERVE FROM PICTURE 1: her face, hair, outfit, all-but-the-holding-arm pose, the entire patio scene, and the existing lighting.\n\nUNIQUENESS: exactly one box in the scene.\n\nLIGHTING: strong warm golden-hour sun from her right; light the box's surface with it — do not tint the packaging colors.",
+  "step_2_image_prompt": "EDIT: Add the product box from Picture 2 into her hands at upper-chest level beside her face — right hand cupping the bottom edge, left hand steadying the top corner, the printed front face square to the camera. The box is large for a handheld product: its long side is about the length of her forearm, big enough that its front-face text reads clearly — never wider than her shoulders. Her arms move naturally from her sides to present it.\n\nPRODUCT (match Picture 2 exactly): A horizontal rectangular white cardboard box with the text \"TIRZEPATIDE\", \"ALLUVI\", \"40mg\" on the front face, a flowing blue wave gradient across the lower front and a circular green certification seal. The printed design rotates with the box as one rigid surface — never reflowed, mirrored, or text-reversed.\n\nANATOMY: natural human anatomy — two arms, two hands. Fingers that grip or pass behind the box stay hidden behind it; do not add visible fingers around the box to complete the hand. No extra limbs.\n\nPRESERVE FROM PICTURE 1: her face, hair, outfit, lower-body pose, the entire patio scene, and the existing lighting.\n\nUNIQUENESS: exactly one box in the scene.\n\nLIGHTING: strong warm golden-hour sun from her right; light the box's surface with it — do not tint the packaging colors.",
   "word_count": 162,
   "structure_breakdown": {
-    "edit": "Add the product box from Picture 2 into her right hand at upper-chest level — at upper-chest level specifically, not above her head, not at her hip. The box is hand-sized, about the width of her palm — never wider than her forearm; scale it to her hand, not to the frame. Her thumb rests on the front face, fingers wrap the back edge, the printed front face angled toward the camera. Her right arm moves naturally from her side to hold it.",
+    "edit": "Add the product box from Picture 2 into her hands at upper-chest level beside her face — right hand cupping the bottom edge, left hand steadying the top corner, the printed front face square to the camera. The box is large for a handheld product: its long side is about the length of her forearm, big enough that its front-face text reads clearly — never wider than her shoulders. Her arms move naturally from her sides to present it.",
     "product": "A horizontal rectangular white cardboard box with the text \"TIRZEPATIDE\", \"ALLUVI\", \"40mg\" on the front face, a flowing blue wave gradient across the lower front and a circular green certification seal. The printed design rotates with the box as one rigid surface — never reflowed, mirrored, or text-reversed.",
     "anatomy": "natural human anatomy — two arms, two hands. Fingers that grip or pass behind the box stay hidden behind it; do not add visible fingers around the box to complete the hand. No extra limbs.",
     "preserve": "her face, hair, outfit, all-but-the-holding-arm pose, the entire patio scene, and the existing lighting.",
@@ -258,7 +266,7 @@ Three examples — held with a re-pose, placed_on_surface, and a mirror/phone ca
     "no_finger_counting": true,
     "single_product_clause_present": true,
     "lighting_direction_only": true,
-    "word_count_under_200": true,
+    "word_count_in_budget": true,
     "compliance_clean": true
   }
 }
@@ -275,10 +283,10 @@ Three examples — held with a re-pose, placed_on_surface, and a mirror/phone ca
 ```json
 {
   "scenario_id": "travel_hotel_morning_29",
-  "step_2_image_prompt": "EDIT: Place the product box from Picture 2 on the warm-wood nightstand to her right, between the brass reading lamp and the hardcover travel guidebook, front face angled three-quarters toward the camera. The box is palm-sized — about the size of the guidebook beside it, small relative to her body; scale it to the nightstand props, not to the frame. Her pose stays exactly as in Picture 1.\n\nPRODUCT (match Picture 2 exactly): A horizontal rectangular white cardboard box with the text \"TIRZEPATIDE\", \"ALLUVI\", \"40mg\" on the front face, a flowing blue wave gradient across the lower front and a circular green certification seal. The printed design rotates with the box as one rigid surface — never reflowed, mirrored, or text-reversed.\n\nANATOMY: natural human anatomy — two arms, two hands. No extra limbs.\n\nPRESERVE FROM PICTURE 1: her face, hair, outfit, pose, the entire hotel-bedroom scene, and the existing lighting.\n\nUNIQUENESS: exactly one box in the scene.\n\nLIGHTING: bright soft morning daylight from the windows behind the bed; light the box's surface with it — do not tint the packaging colors.",
+  "step_2_image_prompt": "EDIT: Place the product box from Picture 2 on the warm-wood nightstand to her right, between the brass reading lamp and the hardcover travel guidebook, front face angled three-quarters toward the camera. The box is about the size of the hardcover guidebook beside it — large enough that its front text reads clearly, scaled to the nightstand props, not to the frame. Her pose stays exactly as in Picture 1.\n\nPRODUCT (match Picture 2 exactly): A horizontal rectangular white cardboard box with the text \"TIRZEPATIDE\", \"ALLUVI\", \"40mg\" on the front face, a flowing blue wave gradient across the lower front and a circular green certification seal. The printed design rotates with the box as one rigid surface — never reflowed, mirrored, or text-reversed.\n\nANATOMY: natural human anatomy — two arms, two hands. No extra limbs.\n\nPRESERVE FROM PICTURE 1: her face, hair, outfit, pose, the entire hotel-bedroom scene, and the existing lighting.\n\nUNIQUENESS: exactly one box in the scene.\n\nLIGHTING: bright soft morning daylight from the windows behind the bed; light the box's surface with it — do not tint the packaging colors.",
   "word_count": 151,
   "structure_breakdown": {
-    "edit": "Place the product box from Picture 2 on the warm-wood nightstand to her right, between the brass reading lamp and the hardcover travel guidebook, front face angled three-quarters toward the camera. The box is palm-sized — about the size of the guidebook beside it, small relative to her body; scale it to the nightstand props, not to the frame. Her pose stays exactly as in Picture 1.",
+    "edit": "Place the product box from Picture 2 on the warm-wood nightstand to her right, between the brass reading lamp and the hardcover travel guidebook, front face angled three-quarters toward the camera. The box is about the size of the hardcover guidebook beside it — large enough that its front text reads clearly, scaled to the nightstand props, not to the frame. Her pose stays exactly as in Picture 1.",
     "product": "A horizontal rectangular white cardboard box with the text \"TIRZEPATIDE\", \"ALLUVI\", \"40mg\" on the front face, a flowing blue wave gradient across the lower front and a circular green certification seal. The printed design rotates with the box as one rigid surface — never reflowed, mirrored, or text-reversed.",
     "anatomy": "natural human anatomy — two arms, two hands. No extra limbs.",
     "preserve": "her face, hair, outfit, pose, the entire hotel-bedroom scene, and the existing lighting.",
@@ -306,7 +314,7 @@ Three examples — held with a re-pose, placed_on_surface, and a mirror/phone ca
     "no_finger_counting": true,
     "single_product_clause_present": true,
     "lighting_direction_only": true,
-    "word_count_under_200": true,
+    "word_count_in_budget": true,
     "compliance_clean": true
   }
 }
@@ -323,10 +331,10 @@ Three examples — held with a re-pose, placed_on_surface, and a mirror/phone ca
 ```json
 {
   "scenario_id": "gym_post_workout_mirror_01",
-  "step_2_image_prompt": "EDIT: Add the product box from Picture 2 into her right hand at upper-chest level, front face angled toward the mirror. Her arms are currently crossed over her midriff — uncross her right arm and raise it to hold the box at upper-chest level, not at her waist. The box is hand-sized, about the width of her palm — never wider than her forearm; scale it to her hand, not to the frame. Her thumb rests on the front face, fingers wrap the back edge. The left hand keeps holding the phone.\n\nPRODUCT (match Picture 2 exactly): A horizontal rectangular white cardboard box with the text \"TIRZEPATIDE\", \"ALLUVI\", \"40mg\" on the front face, a flowing blue wave gradient across the lower front and a circular green certification seal. The printed design rotates with the box as one rigid surface — never reflowed, mirrored, or text-reversed.\n\nANATOMY: natural human anatomy — two arms, two hands. Fingers that grip or pass behind the box stay hidden behind it; do not add visible fingers around the box to complete the hand. No extra limbs.\n\nPRESERVE FROM PICTURE 1: her face, hair, outfit, lower-body pose, the phone hand, the entire gym-mirror scene, and the existing lighting.\n\nUNIQUENESS: exactly one box in the scene (its mirror reflection is the same box, not a duplicate).\n\nLIGHTING: cool overhead gym light with warm window backlight; light the box's surface with it — do not tint the packaging colors.",
+  "step_2_image_prompt": "EDIT: Add the product box from Picture 2 into her right hand at upper-chest level, front face angled toward the mirror. Her arms are currently crossed over her midriff — uncross her right arm and raise it; her hand grips the lower long edge, thumb on the front face, fingers behind. The box is large: its long side is about the length of her forearm, big enough that its front-face text reads clearly — never wider than her shoulders. The left hand keeps holding the phone.\n\nPRODUCT (match Picture 2 exactly): A horizontal rectangular white cardboard box with the text \"TIRZEPATIDE\", \"ALLUVI\", \"40mg\" on the front face, a flowing blue wave gradient across the lower front and a circular green certification seal. The printed design rotates with the box as one rigid surface — never reflowed, mirrored, or text-reversed.\n\nANATOMY: natural human anatomy — two arms, two hands. Fingers that grip or pass behind the box stay hidden behind it; do not add visible fingers around the box to complete the hand. No extra limbs.\n\nPRESERVE FROM PICTURE 1: her face, hair, outfit, lower-body pose, the phone hand, the entire gym-mirror scene, and the existing lighting.\n\nUNIQUENESS: exactly one box in the scene (its mirror reflection is the same box, not a duplicate).\n\nLIGHTING: cool overhead gym light with warm window backlight; light the box's surface with it — do not tint the packaging colors.",
   "word_count": 187,
   "structure_breakdown": {
-    "edit": "Add the product box from Picture 2 into her right hand at upper-chest level, front face angled toward the mirror. Her arms are currently crossed over her midriff — uncross her right arm and raise it to hold the box at upper-chest level, not at her waist. The box is hand-sized, about the width of her palm — never wider than her forearm; scale it to her hand, not to the frame. Her thumb rests on the front face, fingers wrap the back edge. The left hand keeps holding the phone.",
+    "edit": "Add the product box from Picture 2 into her right hand at upper-chest level, front face angled toward the mirror. Her arms are currently crossed over her midriff — uncross her right arm and raise it; her hand grips the lower long edge, thumb on the front face, fingers behind. The box is large: its long side is about the length of her forearm, big enough that its front-face text reads clearly — never wider than her shoulders. The left hand keeps holding the phone.",
     "product": "A horizontal rectangular white cardboard box with the text \"TIRZEPATIDE\", \"ALLUVI\", \"40mg\" on the front face, a flowing blue wave gradient across the lower front and a circular green certification seal. The printed design rotates with the box as one rigid surface — never reflowed, mirrored, or text-reversed.",
     "anatomy": "natural human anatomy — two arms, two hands. Fingers that grip or pass behind the box stay hidden behind it; do not add visible fingers around the box to complete the hand. No extra limbs.",
     "preserve": "her face, hair, outfit, lower-body pose, the phone hand, the entire gym-mirror scene, and the existing lighting.",
@@ -354,7 +362,7 @@ Three examples — held with a re-pose, placed_on_surface, and a mirror/phone ca
     "no_finger_counting": true,
     "single_product_clause_present": true,
     "lighting_direction_only": true,
-    "word_count_under_200": true,
+    "word_count_in_budget": true,
     "compliance_clean": true
   }
 }
@@ -395,7 +403,7 @@ partially hidden by the product still fully exist..."
 
 **Why this fails:** the model has no unit grounding — "7 inches" is noise, and "prominently" invites frame-relative scaling, which renders the box as large as a laptop lying across her forearm.
 
-**Correct:** `"The box is hand-sized, about the width of her palm — never wider than her forearm; scale it to her hand, not to the frame."`
+**Correct:** `"The box is large for a handheld product — its long side about the length of her forearm, big enough that its front-face text reads clearly, never wider than her shoulders."` (size tier chosen from the REAL dimensions in the packaging data — you translate units into a body anchor; the image model never sees the units.)
 
 ### Anti-Example D — Doesn't quote product text (BANNED — garbled-text failure)
 
@@ -439,6 +447,6 @@ Step 1 produces a clean persona-in-scene with no product. Your prompt is a short
 5. **UNIQUENESS** — one line
 6. **LIGHTING** — one compressed directional line
 
-Refer to the images ONLY as **Picture 1** and **Picture 2**. Word budget: **100–170 target, hard ceiling 200.**
+Refer to the images ONLY as **Picture 1** and **Picture 2**. Word budget: **110–185 target, hard ceiling 210.**
 
 **Output JSON only. No preamble. No markdown fences.**

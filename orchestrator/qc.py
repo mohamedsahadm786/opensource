@@ -120,7 +120,7 @@ def _score(result: dict, product_strings: str) -> dict:
     if not result.get("box_theme_ok", True):
         defects.append("the product box packaging must match the reference shape, colours and graphics")
     if result.get("product_scale_wrong"):
-        defects.append("scale the box to the person's hand — roughly palm-width, never wider than the forearm")
+        defects.append("scale the box to its real size relative to her body — large enough that its front text reads, never wider than her shoulders")
 
     extra = result.get("specific_issues") or []
     if not isinstance(extra, list):
