@@ -5,8 +5,11 @@ import { adminInvoke } from './adminApi.js';
 // Edge Function (impersonation_events has no anon policy).
 async function logEvent(tenant, action) {
     try {
+        // NOTE: the event verb travels as `event_action` — a payload key named
+        // `action` collides with (and overwrites) the router's action in
+        // adminInvoke's body spread, which silently broke all audit writes.
         await adminInvoke('log_event', {
-            action,
+            event_action: action,
             tenant_id: tenant.tenant_id,
             tenant_name: tenant.name || null,
             tenant_email: tenant.email || null,

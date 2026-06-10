@@ -98,10 +98,14 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'log_event') {
-      const { action: act, tenant_id, tenant_name, tenant_email } = body as Record<string, string>;
+      // The event verb arrives as `event_action` — it must NOT be named `action`,
+      // which is the router key (the old name collided in the client's body
+      // spread and silently broke all audit writes).
+      const { event_action, tenant_id, tenant_name, tenant_email } = body as Record<string, string>;
+      if (!event_action) return json({ ok: false, error: 'missing_event_action' }, 400);
       const { error } = await admin.from('impersonation_events').insert({
         actor: 'super_admin',
-        action: act,
+        action: event_action,
         tenant_id: tenant_id || null,
         tenant_name: tenant_name || null,
         tenant_email: tenant_email || null,
