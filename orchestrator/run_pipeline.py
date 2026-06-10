@@ -193,7 +193,9 @@ def _record_qc(tenant_id: str, output_id: str, attempt: int, decision: dict) -> 
 
 def _set_qc_status(persona_id, scenario_uuid, status, reason, attempts):
     try:
-        sb().table("outputs").update({"qc_status": status, "qc_reason": (reason or None), "attempts": attempts}) \
+        from datetime import datetime, timezone
+        sb().table("outputs").update({"qc_status": status, "qc_reason": (reason or None), "attempts": attempts,
+                                      "updated_at": datetime.now(timezone.utc).isoformat()}) \
             .eq("persona_id", persona_id).eq("scenario_id", scenario_uuid).execute()
     except Exception as e:
         print(f"   (warn) outputs qc_status update failed: {e}")
