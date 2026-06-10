@@ -37,6 +37,7 @@ PRODUCT (judge the rendered product against the PRODUCT REFERENCE above):
 10. product_shape_broken: is the product warped, melted, or bent into an impossible shape vs the reference? Minor perspective/angle is FINE. (expected: false)
 11. product_text_legible: are the product's main / most-prominent text strings (the ones the reference marks as largest/most important) at least ~80% legible and recognisable — a viewer can clearly read them, even if a letter or two is slightly off? (expected: true)
 12. box_theme_ok: does the product match the reference's shape, colours and key graphics at roughly 80%+? Exact content not required. (expected: true)
+13. product_scale_wrong: is the product CLEARLY the wrong size relative to the person — e.g. a handheld box rendered wider than the forearm holding it, laptop-sized, or comically tiny? Judge against the person's hand/body in THIS image. A handheld product should read roughly palm-to-hand sized. Slightly large or small is FINE — only flag a blatant mismatch. (expected: false)
 
 Then provide:
 - specific_issues: short list of ONLY the real defects found. Each item a SHORT imperative phrase (e.g. "doubled palm on the left hand", "extra hand-mass on the right wrist", "product text garbled"). Empty list if the image is acceptable.
@@ -62,6 +63,7 @@ Respond with EXACTLY this JSON, no extra keys:
   "product_shape_broken": <bool>,
   "product_text_legible": <bool>,
   "box_theme_ok": <bool>,
+  "product_scale_wrong": <bool>,
   "specific_issues": [<string>, ...],
   "overall_recommendation": "use" | "regenerate" | "discard",
   "confidence": <float>

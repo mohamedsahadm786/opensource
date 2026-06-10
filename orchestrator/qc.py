@@ -119,6 +119,8 @@ def _score(result: dict, product_strings: str) -> dict:
         defects.append(f"the box text must clearly show {product_strings}")
     if not result.get("box_theme_ok", True):
         defects.append("the product box packaging must match the reference shape, colours and graphics")
+    if result.get("product_scale_wrong"):
+        defects.append("scale the box to the person's hand — roughly palm-width, never wider than the forearm")
 
     extra = result.get("specific_issues") or []
     if not isinstance(extra, list):
@@ -139,7 +141,7 @@ def _score(result: dict, product_strings: str) -> dict:
     keys = ["person_count", "has_extra_limbs", "has_malformed_hand", "has_malformed_arm_or_leg",
             "has_blatant_finger_blunder", "face_grossly_distorted", "placement_illogical",
             "product_visible", "multiple_distinct_products", "product_shape_broken",
-            "product_text_legible", "box_theme_ok"]
+            "product_text_legible", "box_theme_ok", "product_scale_wrong"]
     return {
         "passed": passed,
         "score": round(max(0.0, 1.0 - len(defects) * 0.15), 3),

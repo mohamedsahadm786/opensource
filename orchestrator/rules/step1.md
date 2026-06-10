@@ -108,9 +108,9 @@ PERSONA BUILD block>. <She|He> is wearing <outfit from scenario>."
 "<setting from scenario>, <key surfaces and props>, <background depth>."
 
 [Sentence 3: Pose + hand visibility rule, 30–45 words]
-"She <pose>. Both hands are visible in the frame, not in her pockets, not
-behind her back, not cropped out of frame. Her hands rest at <natural
-resting positions from scenario>."
+"She <pose>. Both hands are fully visible in the frame with clear space around
+each hand. Her <left|right> hand <explicit resting place>, her other hand
+<explicit resting place>."
 
 [Sentence 4: Lighting, 15–25 words]
 "<lighting from scenario verbatim>."
@@ -157,15 +157,17 @@ Combined effect: the persona descriptor is bracketed by photoreal anchors at bot
 
 Hidden hands are the laziest way models "solve" hand-rendering — and they make Step 2 unable to composite a product because there's no hand to put a product in.
 
-EVERY Step 1 prompt must explicitly include language that keeps both hands visible:
+EVERY Step 1 prompt must include hand language — and it must be **POSITIVE-ONLY**. Diffusion models attend to nouns and largely ignore negations: writing "not in her pockets" plants the token "pockets" and makes a pocketed hand MORE likely (observed in production — the prompt said "not in her pockets" and FLUX rendered a hand in the pocket anyway). So:
 
-> *"Both hands are visible in the frame, not in her pockets, not behind her back, not cropped out of frame, not hidden behind her body."*
+> Required pattern (sentence 3): *"Both hands are fully visible in the frame with clear space around each hand. Her <left|right> hand <explicit resting place>, her other hand <explicit resting place>."*
 
-For full-body and three-quarter framings, place this phrase in sentence 3 (pose). For mirror selfies, both hands are naturally visible (one holds phone, one is at her side / on her hip / on the counter). For close-ups where only the upper body is in frame, both hands within frame must still be visible — not tucked behind shoulders.
+- Give EACH hand an explicit, concrete resting place — that is what keeps it visible.
+- **NEVER write the words "pocket(s)", "behind her back", "hidden", "tucked", or "crossed" in the prompt** — describe only where the hands ARE, never where they are not.
+- For mirror selfies, one hand holds the phone at face level and the other gets an explicit resting place. For close-ups, both hands still get explicit in-frame positions.
 
-Acceptable hand resting positions: at her side, on her hip, resting on a counter / counter edge / wall / chair / her own knee / her own thigh, holding a relevant scene prop (matcha bowl, water bottle, phone for mirror selfies), gently touching her hair / earring / collarbone. NEVER acceptable: in pockets, behind back, behind body, crossed and tucked under armpits, cropped out of frame.
+Acceptable hand resting positions: at her side, on her hip, resting on a counter / counter edge / wall / chair / her own knee / her own thigh, holding a relevant scene prop (matcha bowl, water bottle, phone for mirror selfies), gently touching her hair / earring / collarbone. The depicted result must never be: hands in pockets, behind the back, crossed under armpits, or cropped out of frame — you prevent those by ASSIGNING each hand a visible place, not by naming the failure.
 
-This is a hard rule, not a soft preference. If your prompt does not explicitly forbid pockets and hiding, PuLID will hide the hands ~30% of the time on full-body framings.
+This is a hard rule, not a soft preference. An unplaced hand is a hand PuLID will hide ~30% of the time on full-body framings — and a hidden or crossed hand leaves Step 2 nowhere to put the product.
 
 ---
 
@@ -514,12 +516,12 @@ The examples deliberately span DIFFERENT personas — a lean young woman, a heav
 ```json
 {
   "scenario_id": "outdoor_golden_hour_patio_27",
-  "step_1_image_prompt": "A 31-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She has a soft natural average build with relaxed everyday proportions. She is wearing a black square-neck ribbed cropped tank top and matching black mid-thigh tailored shorts, low-heeled brown leather sandals, a thin gold tennis bracelet on her right wrist, small gold huggie hoops, hair down in soft beach waves with a center part. She stands on a modern minimalist patio at golden hour, a low concrete planter with small ornamental grasses behind her, a folded teak deck chair to her right, distant city skyline softly out of focus in the deep background. Standing facing the camera at a slight three-quarter angle, weight on her right leg, looking directly at the camera with a relaxed confident smile. Both hands are visible in the frame, not in her pockets, not behind her back, not cropped out of frame. Her right hand rests gently at her side, her left hand on her hip. Strong warm golden-hour sunlight from a low angle on her right side, golden rim light across her right shoulder, soft cool sky in the background. Shot on iPhone 15 Pro 35mm equivalent. Real photograph, not AI-generated, no model pose, candid moment. Golden-hour glow confident calm mood, palette of black tailored, warm gold, deep amber. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face.",
-  "word_count": 266,
+  "step_1_image_prompt": "A 31-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She has a soft natural average build with relaxed everyday proportions. She is wearing a black square-neck ribbed cropped tank top and matching black mid-thigh tailored shorts, low-heeled brown leather sandals, a thin gold tennis bracelet on her right wrist, small gold huggie hoops, hair down in soft beach waves with a center part. She stands on a modern minimalist patio at golden hour, a low concrete planter with small ornamental grasses behind her, a folded teak deck chair to her right, distant city skyline softly out of focus in the deep background. Standing facing the camera at a slight three-quarter angle, weight on her right leg, looking directly at the camera with a relaxed confident smile. Both hands are fully visible in the frame with clear space around each hand. Her right hand rests gently at her side, her left hand on her hip. Strong warm golden-hour sunlight from a low angle on her right side, golden rim light across her right shoulder, soft cool sky in the background. Shot on iPhone 15 Pro 35mm equivalent. Real photograph, not AI-generated, no model pose, candid moment. Golden-hour glow confident calm mood, palette of black tailored, warm gold, deep amber. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face.",
+  "word_count": 260,
   "structure_breakdown": {
     "sentence_1_identity_outfit": "A 31-year-old Mediterranean woman with sun-kissed deep-tan skin, green almond eyes, and brunette-with-blonde-balayage waves to her mid-back, captured in a candid amateur smartphone snapshot with natural skin texture and visible pores. She has a soft natural average build with relaxed everyday proportions. She is wearing a black square-neck ribbed cropped tank top and matching black mid-thigh tailored shorts, low-heeled brown leather sandals, a thin gold tennis bracelet on her right wrist, small gold huggie hoops, hair down in soft beach waves with a center part.",
     "sentence_2_scene": "She stands on a modern minimalist patio at golden hour, a low concrete planter with small ornamental grasses behind her, a folded teak deck chair to her right, distant city skyline softly out of focus in the deep background.",
-    "sentence_3_pose_empty_product_hand": "Standing facing the camera at a slight three-quarter angle, weight on her right leg, looking directly at the camera with a relaxed confident smile. Both hands are visible in the frame, not in her pockets, not behind her back, not cropped out of frame. Her right hand rests gently at her side, her left hand on her hip.",
+    "sentence_3_pose_empty_product_hand": "Standing facing the camera at a slight three-quarter angle, weight on her right leg, looking directly at the camera with a relaxed confident smile. Both hands are fully visible in the frame with clear space around each hand. Her right hand rests gently at her side, her left hand on her hip.",
     "sentence_4_lighting": "Strong warm golden-hour sunlight from a low angle on her right side, golden rim light across her right shoulder, soft cool sky in the background.",
     "sentence_5_camera_mood_lock": "Shot on iPhone 15 Pro 35mm equivalent. Real photograph, not AI-generated, no model pose, candid moment. Golden-hour glow confident calm mood, palette of black tailored, warm gold, deep amber. Reference image is the persona — preserve her face, eye color, eye shape, brow shape, nose shape, lip shape, jaw line, and hair color exactly. Do not improvise her face."
   },
