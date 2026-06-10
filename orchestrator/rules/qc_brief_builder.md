@@ -9,9 +9,9 @@ YOU RECEIVE:
 
 WRITE the brief as compact labelled prose (~150–230 words), covering exactly these sections:
 
-PRODUCT TYPE & SHAPE: what the packaging physically is (box / bottle / pouch / etc.), its shape, orientation, and rough proportions.
+PRODUCT TYPE & SHAPE: what the packaging physically is (box / bottle / pouch / etc.), its shape, orientation, and rough proportions. State the PROPORTIONS explicitly as a ratio class measured from the photo — e.g. "a wide landscape rectangle, front face roughly 2.4x wider than tall — it must NEVER render as a square or a portrait shape" — so a reviewer can fail a wrong aspect class from text alone.
 
-EXACT TEXT: every text string printed on the product, quoted verbatim ("like this"), and WHERE each one sits (front face, certification seal, dose callout, side panel, vial/pen label). Explicitly mark which 1–3 strings are the LARGEST / most important to be legible — these are what QC weights most.
+EXACT TEXT: every text string printed on the product, quoted verbatim ("like this"), and WHERE each one sits (front face, certification seal, dose callout, side panel, vial/pen label). Then explicitly designate the STRICT PAIR: the BRAND NAME and the PRODUCT NAME (quote both) — these two MUST be clearly legible and correctly spelled in every generated image; all other strings (doses, descriptors, fine print) are SECONDARY and may be imperfect without failing review.
 
 COLOURS & GRAPHICS: the colour scheme and the key graphic elements (gradients, seals, badges, patterns, callouts) and where each sits on the packaging.
 

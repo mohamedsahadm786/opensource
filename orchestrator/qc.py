@@ -30,7 +30,10 @@ from supabase import create_client, Client
 HERE = Path(__file__).resolve().parent
 load_dotenv(HERE / ".env")
 
-QC_MODEL = os.environ.get("QC_MODEL", "claude-sonnet-4-5-20250929")
+# Opus as the QC judge: empirically (2026-06-10, 3-hand leftover test) Sonnet 4.6
+# rationalized a third hand away twice; Opus 4.7 counted it correctly and produced
+# precise retry feedback. ~2 cents/check more — far cheaper than one bad video.
+QC_MODEL = os.environ.get("QC_MODEL", "claude-opus-4-7")
 RULES_DIR = Path(os.environ.get("RULES_DIR", HERE / "rules"))
 _sb: Client | None = None
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
@@ -75,9 +78,23 @@ def _reference(product: dict) -> str:
     return (product.get("qc_brief") or "").strip() or _fallback_reference(product)
 
 
-def _prompts(product: dict) -> tuple[str, str]:
+def placement_intent(scenario_spec: dict | None) -> str:
+    """Short plain-English description of the scenario's intended product placement,
+    so QC can judge held-vs-placed correctly (a surface placement must never fail
+    for 'not being held'; a held intent must actually be in a hand)."""
+    spec = scenario_spec or {}
+    arch = str(spec.get("archetype") or "").strip()
+    grip = str(spec.get("grip_or_placement") or "").strip()
+    if not arch and not grip:
+        return ("unspecified — accept either a natural hold IN a hand or a natural rest "
+                "ON a surface; fail only floating/dumped/impossible placement")
+    return f"{arch}: {grip}"[:400] if grip else arch
+
+
+def _prompts(product: dict, intent: str | None = None) -> tuple[str, str]:
     raw = (RULES_DIR / "qc.md").read_text(encoding="utf-8")
     raw = raw.replace("{{PRODUCT_REFERENCE}}", _reference(product))
+    raw = raw.replace("{{INTENDED_PLACEMENT}}", intent or placement_intent(None))
     system, _, rubric = raw.partition("===RUBRIC===")
     return system.strip(), rubric.strip()
 
@@ -92,17 +109,32 @@ def _parse_json(text: str) -> dict:
     return json.loads(t[i:j + 1])
 
 
-def _score(result: dict, product_strings: str) -> dict:
+def _score(result: dict, product_strings: str, expect_person: bool = True) -> dict:
     defects: list[str] = []
     pc = result.get("person_count")
-    if pc is not None and pc != 1:
-        defects.append(f"show exactly one person (not {pc})")
+    expected_pc = 1 if expect_person else 0
+    if pc is not None and pc != expected_pc:
+        defects.append(f"show exactly {'one person' if expect_person else 'no person (flat-lay)'} (not {pc})")
+    # code-side hand arithmetic: trust the model's own census over its bool — and
+    # over its count, which it sometimes rationalizes down ("same arm"). The number
+    # of NUMBERED entries it wrote is the honest signal.
+    try:
+        hands = int(result.get("total_visible_hands") or 0)
+    except (TypeError, ValueError):
+        hands = 0
+    census = str((result.get("limb_description") or {}).get("hands") or "")
+    listed = [int(n) for n in re.findall(r"[Hh]and\s*(\d+)", census)]
+    hands = max([hands] + listed) if listed else hands
+    if hands > 2:
+        defects.append(f"show exactly two hands — the image contains {hands} (remove the leftover extra hand)")
     if result.get("has_extra_limbs"):
         defects.append("show exactly two arms, two hands and two legs — no extra limbs")
     if result.get("has_malformed_hand"):
         defects.append("each wrist has exactly one clean natural hand with one palm — no doubled or extra palms")
     if result.get("has_malformed_arm_or_leg"):
         defects.append("keep every arm and leg natural, separate, and attached at the correct place")
+    if result.get("has_truncated_limb"):
+        defects.append("every arm ends in a hand and every leg in a foot — no limb may stop mid-frame")
     if result.get("has_blatant_finger_blunder"):
         defects.append("render normal natural hands with a normal number of fingers")
     if result.get("face_grossly_distorted"):
@@ -115,8 +147,10 @@ def _score(result: dict, product_strings: str) -> dict:
         defects.append("show exactly ONE product box")
     if result.get("product_shape_broken"):
         defects.append("keep the product a clean undistorted rectangular box")
+    if result.get("product_proportions_wrong"):
+        defects.append("keep the box's real proportions — a wide landscape rectangle, never square")
     if not result.get("product_text_legible", True):
-        defects.append(f"the box text must clearly show {product_strings}")
+        defects.append(f"the brand and product name must be clearly legible and correct: {product_strings}")
     if not result.get("box_theme_ok", True):
         defects.append("the product box packaging must match the reference shape, colours and graphics")
     if result.get("product_scale_wrong"):
@@ -138,10 +172,12 @@ def _score(result: dict, product_strings: str) -> dict:
     rec = result.get("overall_recommendation", "")
     if rec not in ("use", "regenerate", "discard"):
         rec = "use" if passed else "regenerate"
-    keys = ["person_count", "has_extra_limbs", "has_malformed_hand", "has_malformed_arm_or_leg",
-            "has_blatant_finger_blunder", "face_grossly_distorted", "placement_illogical",
-            "product_visible", "multiple_distinct_products", "product_shape_broken",
-            "product_text_legible", "box_theme_ok", "product_scale_wrong"]
+    keys = ["total_visible_hands", "held_objects", "person_count", "has_extra_limbs",
+            "has_malformed_hand", "has_malformed_arm_or_leg",
+            "has_truncated_limb", "has_blatant_finger_blunder", "face_grossly_distorted",
+            "placement_illogical", "product_visible", "multiple_distinct_products",
+            "product_shape_broken", "product_proportions_wrong", "product_scale_wrong",
+            "product_text_legible", "box_theme_ok"]
     return {
         "passed": passed,
         "score": round(max(0.0, 1.0 - len(defects) * 0.15), 3),
@@ -155,9 +191,12 @@ def _score(result: dict, product_strings: str) -> dict:
     }
 
 
-def validate(image_bytes: bytes, media_type: str, product: dict, api_key: str, scenario_id: str = "?") -> dict:
-    """Run BALANCED QC. On any QC-infrastructure error, treat as PASS (don't punish the image)."""
-    system, rubric = _prompts(product)
+def validate(image_bytes: bytes, media_type: str, product: dict, api_key: str,
+             scenario_id: str = "?", intent: str | None = None) -> dict:
+    """Run QC (lenient on photography, zero-tolerance on anatomy/physics).
+    On any QC-infrastructure error, treat as PASS (don't punish the image)."""
+    system, rubric = _prompts(product, intent)
+    expect_person = "flat_lay" not in (intent or "")
     print(f"[qc] {scenario_id}: validating via {QC_MODEL}…")
     try:
         resp = Anthropic(api_key=api_key).messages.create(
@@ -172,7 +211,7 @@ def validate(image_bytes: bytes, media_type: str, product: dict, api_key: str, s
         print(f"[qc] {scenario_id}: QC ERROR — {type(e).__name__}: {e} (treating as pass)")
         return {"passed": True, "score": 0.5, "checks": {}, "issues": [], "recommendation": "use",
                 "confidence": 0.0, "error": f"{type(e).__name__}: {e}", "model": QC_MODEL}
-    decision = _score(result, _product_strings(product))
+    decision = _score(result, _product_strings(product), expect_person=expect_person)
     print(f"[qc] {scenario_id}: {'PASS' if decision['passed'] else 'FAIL'} "
           f"(score={decision['score']}, issues={len(decision['issues'])}, rec={decision['recommendation']})")
     for it in decision["issues"]:
@@ -199,16 +238,19 @@ def main() -> None:
     persona = sb().table("personas").select("id").eq("tiktok_account_id", account["id"]).limit(1).execute().data
     if not persona:
         sys.exit("[qc] no persona for this account")
-    out = sb().table("outputs").select("step2_asset_id").eq("persona_id", persona[0]["id"]).eq("scenario_key", sys.argv[2]).limit(1).execute().data
+    out = sb().table("outputs").select("step2_asset_id,scenario_id").eq("persona_id", persona[0]["id"]).eq("scenario_key", sys.argv[2]).limit(1).execute().data
     if not out or not out[0].get("step2_asset_id"):
         sys.exit(f"[qc] no step2 composite for scenario {sys.argv[2]!r} — run step2 first")
     asset = sb().table("media_assets").select("bucket,path,mime_type").eq("id", out[0]["step2_asset_id"]).limit(1).execute().data[0]
     image_bytes = sb().storage.from_(asset["bucket"]).download(asset["path"])
     product = sb().table("products").select("name,packaging,qc_brief,qc_max_retries").eq("tenant_id", tenant_id).limit(1).execute().data[0]
     api_key = sb().rpc("get_tenant_anthropic_key", {"p_tenant_id": tenant_id}).execute().data
+    spec_rows = sb().table("scenarios").select("spec").eq("id", out[0]["scenario_id"]).limit(1).execute().data if out[0].get("scenario_id") else []
+    intent = placement_intent((spec_rows[0].get("spec") if spec_rows else {}) or {})
     using = "stored qc_brief" if (product.get("qc_brief") or "").strip() else "FALLBACK packaging (no qc_brief yet — run generate_qc_brief.py for best accuracy)"
     print(f"[qc] product reference: {using} | qc_max_retries={product.get('qc_max_retries')}")
-    decision = validate(image_bytes, asset.get("mime_type") or "image/jpeg", product, api_key, sys.argv[2])
+    print(f"[qc] intended placement: {intent}")
+    decision = validate(image_bytes, asset.get("mime_type") or "image/jpeg", product, api_key, sys.argv[2], intent=intent)
     print("\n" + json.dumps({k: decision[k] for k in ("passed", "score", "recommendation", "confidence", "issues", "checks")}, indent=2))
 
 

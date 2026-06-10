@@ -199,13 +199,19 @@ def _set_qc_status(persona_id, scenario_uuid, status, reason, attempts):
         print(f"   (warn) outputs qc_status update failed: {e}")
 
 
-def do_product(account, persona, scenario_uuid, scenario_key, scenario_spec, api_key):
+def do_product(account, persona, scenario_uuid, scenario_key, scenario_spec, api_key) -> bool:
+    """Returns True when the composite is good to continue (QC passed or QC disabled);
+    False when QC failed all attempts — the caller must then SKIP realism + video and
+    move to the next scenario. Terminal qc_status values: 'passed' | 'failed' only."""
     if _stage_done(persona["id"], scenario_uuid, "step2_asset_id"):
         if not QC_ENABLED:
-            print("   product   ✓ (already done)"); return
+            print("   product   ✓ (already done)"); return True
         prev = sb().table("outputs").select("qc_status").eq("persona_id", persona["id"]).eq("scenario_id", scenario_uuid).limit(1).execute().data
-        if prev and prev[0].get("qc_status") in ("passed", "exhausted"):
-            print("   product   ✓ (already done, QC resolved)"); return
+        prev_qc = prev[0].get("qc_status") if prev else None
+        if prev_qc == "passed":
+            print("   product   ✓ (already done, QC passed)"); return True
+        if prev_qc in ("failed", "exhausted"):
+            print("   product   ✗ (QC already failed — skipping this scenario)"); return False
 
     progress("step2")
     product = get_product_full(account["tenant_id"])
@@ -233,24 +239,27 @@ def do_product(account, persona, scenario_uuid, scenario_key, scenario_spec, api
 
         if not QC_ENABLED:
             print(f"   product   ✓{dtxt}")
-            return
+            return True
 
         progress("qc")
         output_id, img, mtype = _download_step2(persona["id"], scenario_uuid)
-        decision = QC.validate(img, mtype, product, api_key, scenario_key)
+        decision = QC.validate(img, mtype, product, api_key, scenario_key,
+                               intent=QC.placement_intent(scenario_spec))
         if output_id:
             _record_qc(account["tenant_id"], output_id, attempt, decision)
         if decision.get("passed"):
             _set_qc_status(persona["id"], scenario_uuid, "passed", None, attempt)
             print(f"   product   ✓{dtxt} (QC pass on attempt {attempt})")
-            return
+            return True
         avoid_line = "; ".join(decision.get("issues") or []) or "regenerate with cleaner anatomy and a faithfully rendered product"
         if attempt <= max_retries:
             print(f"   product   ↻ QC fail (attempt {attempt}/{max_retries + 1}) — retrying with feedback")
         else:
-            _set_qc_status(persona["id"], scenario_uuid, "exhausted", avoid_line[:500], attempt)
-            print(f"   product   ⚠ QC still failing after {attempt} attempts — keeping last composite, continuing")
-            return
+            _set_qc_status(persona["id"], scenario_uuid, "failed", avoid_line[:500], attempt)
+            print(f"   product   ✗ QC FAILED after {attempt} attempts — scenario marked failed; "
+                  f"no realism, no video; moving on")
+            return False
+    return False
 
 
 def do_realism(account, persona, scenario_uuid, scenario_key):
@@ -269,12 +278,16 @@ def do_realism(account, persona, scenario_uuid, scenario_key):
 def pick_scenarios(persona_id: str, n: int) -> list:
     scenarios = sb().table("scenarios").select("id,spec").execute().data or []
     outs = {r["scenario_id"]: r for r in
-            (sb().table("outputs").select("scenario_id,step2_asset_id,step3_asset_id")
+            (sb().table("outputs").select("scenario_id,step2_asset_id,step3_asset_id,qc_status")
              .eq("persona_id", persona_id).execute().data or []) if r.get("scenario_id")}
     final_col = "step3_asset_id" if STEP3_ENABLED else "step2_asset_id"
     picked = []
     for s in scenarios:
-        if not (outs.get(s["id"], {}) or {}).get(final_col):
+        o = outs.get(s["id"], {}) or {}
+        # a QC-failed scenario is CONSUMED — never re-pick it (it would retry forever)
+        if o.get("qc_status") in ("failed", "exhausted"):
+            continue
+        if not o.get(final_col):
             picked.append(s)
         if len(picked) >= n:
             break
@@ -282,9 +295,12 @@ def pick_scenarios(persona_id: str, n: int) -> list:
 
 
 def finished_images_without_video(persona_id: str, limit: int) -> list:
-    finished = sb().table("outputs").select("id,scenario_id,scenario_key,persona_id,status") \
+    finished = sb().table("outputs").select("id,scenario_id,scenario_key,persona_id,status,qc_status") \
         .eq("persona_id", persona_id).eq("status", "step3_done").execute().data or []
-    finished = [o for o in finished if o.get("scenario_id")]
+    # belt-and-braces: a QC-failed output never gets a video (it shouldn't reach
+    # step3_done anymore, but guard against legacy/manual rows)
+    finished = [o for o in finished if o.get("scenario_id")
+                and o.get("qc_status") not in ("failed", "exhausted")]
     have = {v["output_id"] for v in (sb().table("videos").select("output_id").execute().data or []) if v.get("output_id")}
     todo = [o for o in finished if o["id"] not in have]
     todo.sort(key=lambda o: o.get("scenario_key") or "")
@@ -452,7 +468,10 @@ def main() -> None:
             key = spec.get("id", s["id"])
             print(f"[{acct['tiktok_id']}] scenario {i}/{len(scenarios)}: {key}")
             do_scene(acct, persona, s["id"], key, spec, api_key)
-            do_product(acct, persona, s["id"], key, spec, api_key)
+            qc_ok = do_product(acct, persona, s["id"], key, spec, api_key)
+            if not qc_ok:
+                print("   scenario SKIPPED (QC failed) — counts as used; next scenario")
+                continue
             if STEP3_ENABLED:
                 do_realism(acct, persona, s["id"], key)
             print("   scenario complete ✓")
