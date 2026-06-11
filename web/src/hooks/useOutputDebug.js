@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { signedUrls } from '../lib/assets.js';
 
 // Every prompt that produced one output (Brief v2 §7), read-only.
 //
@@ -8,8 +9,15 @@ import { supabase } from '../lib/supabase.js';
 //   image stages → image_generations.output_asset_id ∈ {outputs.step1/step2/step3_asset_id}
 //                  (image_generations.prompt is the full positive prompt fed to the model)
 //   video shots  → media_generations.video_id == videos.id
+//   QC attempts  → qc_checks.output_id == outputs.id (per-attempt verdict + the
+//                  exact Qwen prompt + the archived failed image in 'qc-failed')
+//
+// step2 can have MULTIPLE image_generations rows (one per QC retry; the stored
+// .../step2.jpg is overwritten each attempt) — the row with the HIGHEST attempt
+// is the one that produced the final image, so callers must show that one as
+// "final". Rows are returned ordered attempt-then-time ascending.
 export function useOutputDebug(outputId, videoId) {
-    const [data, setData] = useState({ images: [], media: [], llm: [] });
+    const [data, setData] = useState({ images: [], media: [], llm: [], qc: [] });
     const [status, setStatus] = useState('loading'); // 'loading' | 'ready' | 'error'
     const [error, setError] = useState(null);
 
@@ -27,11 +35,12 @@ export function useOutputDebug(outputId, videoId) {
                 .maybeSingle();
             const assetIds = [out?.step1_asset_id, out?.step2_asset_id, out?.step3_asset_id].filter(Boolean);
 
-            const [imgRes, medRes] = await Promise.all([
+            const [imgRes, medRes, qcRes] = await Promise.all([
                 assetIds.length
                     ? supabase.from('image_generations')
-                        .select('stage_name, prompt, negative_prompt, mask_prompt, seed, cfg, created_at')
+                        .select('stage_name, prompt, negative_prompt, mask_prompt, seed, cfg, attempt_number, created_at')
                         .in('output_asset_id', assetIds)
+                        .order('attempt_number', { ascending: true })
                         .order('created_at', { ascending: true })
                     : Promise.resolve({ data: [] }),
                 videoId
@@ -40,11 +49,27 @@ export function useOutputDebug(outputId, videoId) {
                         .eq('video_id', videoId)
                         .order('created_at', { ascending: true })
                     : Promise.resolve({ data: [] }),
+                supabase.from('qc_checks')
+                    .select('attempt_number, passed, qc_reason, issues, step2_prompt, image_evaluated_path, created_at')
+                    .eq('output_id', outputId)
+                    .order('attempt_number', { ascending: true })
+                    .order('created_at', { ascending: true }),
             ]);
+
+            // Failed attempts have their composite archived in the private
+            // 'qc-failed' bucket (migration 021) — sign them for preview.
+            const qcRows = qcRes.data || [];
+            const failedPaths = qcRows.map((c) => c.image_evaluated_path).filter(Boolean);
+            const urlByPath = failedPaths.length ? await signedUrls('qc-failed', failedPaths) : {};
+            const qc = qcRows.map((c) => ({
+                ...c,
+                failed_image_url: c.image_evaluated_path ? urlByPath[c.image_evaluated_path] || null : null,
+            }));
+
             // llm_calls have no per-output link in this pipeline (no output id,
             // stage_execution_id is null), so they can't be scoped to one output.
             // The real per-stage prompt lives on image_generations.prompt above.
-            setData({ images: imgRes.data || [], media: medRes.data || [], llm: [] });
+            setData({ images: imgRes.data || [], media: medRes.data || [], llm: [], qc });
             setStatus('ready');
         } catch (err) {
             console.error('[Alluvi] debug load failed', err);

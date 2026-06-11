@@ -8,7 +8,7 @@ import { useOutputDebug } from '../hooks/useOutputDebug.js';
 //   mode='video' → video shots (media_generations: Wan motion + dialogue) + the
 //                  script-generation call.
 export function DebugModal({ open, row, mode = 'image', onClose }) {
-    const { images, media, llm, status } = useOutputDebug(open ? row?.id : null, open ? row?.video?.id : null);
+    const { images, media, llm, qc, status } = useOutputDebug(open ? row?.id : null, open ? row?.video?.id : null);
     if (!open || !row) return null;
 
     const isVideo = mode === 'video';
@@ -16,9 +16,12 @@ export function DebugModal({ open, row, mode = 'image', onClose }) {
     // llm_calls.purpose: 'script' is the video script; everything else
     // (phasea/step1/step2/qc) built the image.
     const llmRows = (llm || []).filter((c) => (isVideo ? c.purpose === 'script' : c.purpose !== 'script'));
+    const qcRows = qc || [];
     const nothing = isVideo
         ? media.length === 0 && llmRows.length === 0
-        : images.length === 0 && llmRows.length === 0;
+        : images.length === 0 && llmRows.length === 0 && qcRows.length === 0;
+    // step2 has one row per QC retry; the HIGHEST attempt made the stored image.
+    const finalStep2Attempt = Math.max(0, ...images.filter((g) => g.stage_name === 'step2').map((g) => g.attempt_number || 1));
 
     return (
         <Modal open={open} onClose={onClose} labelledBy="debug-title">
@@ -39,11 +42,37 @@ export function DebugModal({ open, row, mode = 'image', onClose }) {
 
                     {!isVideo && images.length > 0 && (
                         <Section title="Image stages (image_generations)">
-                            {images.map((g, i) => (
-                                <Block key={i} head={`${g.stage_name} · seed ${g.seed ?? '—'} · cfg ${g.cfg ?? '—'}`}>
-                                    <Field label="prompt" value={g.prompt} />
-                                    <Field label="negative" value={g.negative_prompt} />
-                                    <Field label="mask" value={g.mask_prompt} />
+                            {images.map((g, i) => {
+                                const att = g.attempt_number || 1;
+                                const tag = g.stage_name === 'step2' && finalStep2Attempt > 1
+                                    ? ` · attempt ${att}${att === finalStep2Attempt ? ' (FINAL — made the stored image)' : ''}`
+                                    : '';
+                                return (
+                                    <Block key={i} head={`${g.stage_name}${tag} · seed ${g.seed ?? '—'} · cfg ${g.cfg ?? '—'}`}>
+                                        <Field label="prompt" value={g.prompt} />
+                                        <Field label="negative" value={g.negative_prompt} />
+                                        <Field label="mask" value={g.mask_prompt} />
+                                    </Block>
+                                );
+                            })}
+                        </Section>
+                    )}
+
+                    {!isVideo && qcRows.length > 0 && (
+                        <Section title="QC attempts (qc_checks)">
+                            {qcRows.map((c, i) => (
+                                <Block key={i} head={`attempt ${c.attempt_number} · ${c.passed ? 'PASS ✓' : 'FAIL ✗'}${c.qc_reason ? ` · ${c.qc_reason}` : ''}`}>
+                                    {c.failed_image_url && (
+                                        <a href={c.failed_image_url} target="_blank" rel="noopener noreferrer" title="Open the rejected composite full-size">
+                                            <img
+                                                src={c.failed_image_url}
+                                                alt={`QC-failed composite, attempt ${c.attempt_number}`}
+                                                style={{ maxWidth: 180, maxHeight: 240, borderRadius: 8, border: '1px solid var(--border)', display: 'block' }}
+                                            />
+                                        </a>
+                                    )}
+                                    <Field label="QC issues" value={(c.issues || []).join('\n')} />
+                                    <Field label="qwen prompt (this attempt)" value={c.step2_prompt} />
                                 </Block>
                             ))}
                         </Section>

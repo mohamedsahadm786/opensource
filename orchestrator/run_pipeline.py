@@ -176,7 +176,8 @@ def _download_step2(persona_id: str, scenario_uuid: str):
     return o[0]["id"], sb().storage.from_(a["bucket"]).download(a["path"]), (a.get("mime_type") or "image/jpeg")
 
 
-def _record_qc(tenant_id: str, output_id: str, attempt: int, decision: dict) -> None:
+def _record_qc(tenant_id: str, output_id: str, attempt: int, decision: dict,
+               step2_prompt: str | None = None, image_path: str | None = None) -> None:
     avoid = "; ".join(decision.get("issues") or []) or None
     limb = decision.get("limb_description")
     try:
@@ -186,9 +187,24 @@ def _record_qc(tenant_id: str, output_id: str, attempt: int, decision: dict) -> 
             "qc_reason": decision.get("recommendation"), "issues": decision.get("issues"),
             "scores": decision.get("checks"), "avoid_line": avoid,
             "limb_description": limb if isinstance(limb, str) else (json.dumps(limb) if limb else None),
+            "step2_prompt": step2_prompt, "image_evaluated_path": image_path,
         }).execute()
     except Exception as e:
         print(f"   (warn) qc_checks insert failed: {e}")
+
+
+def _archive_qc_fail(tenant_id, account_id, scenario_key, attempt, img, mtype) -> str | None:
+    """TEMP tuning aid (migration 021): copy a QC-failed composite to the private
+    'qc-failed' bucket before the next attempt overwrites .../step2.jpg on the
+    pod's deterministic path. Returns the stored path, or None. Never fatal."""
+    try:
+        path = f"{tenant_id}/{account_id}/{scenario_key}/attempt{attempt}.jpg"
+        sb().storage.from_("qc-failed").upload(
+            path, img, {"content-type": mtype or "image/jpeg", "upsert": "true"})
+        return path
+    except Exception as e:
+        print(f"   (warn) qc-failed archive upload failed: {e}")
+        return None
 
 
 def _set_qc_status(persona_id, scenario_uuid, status, reason, attempts):
@@ -247,8 +263,13 @@ def do_product(account, persona, scenario_uuid, scenario_key, scenario_spec, api
         output_id, img, mtype = _download_step2(persona["id"], scenario_uuid)
         decision = QC.validate(img, mtype, product, api_key, scenario_key,
                                intent=QC.placement_intent(scenario_spec))
+        failed_path = None
+        if not decision.get("passed") and img:
+            failed_path = _archive_qc_fail(account["tenant_id"], account["id"],
+                                           scenario_key, attempt, img, mtype)
         if output_id:
-            _record_qc(account["tenant_id"], output_id, attempt, decision)
+            _record_qc(account["tenant_id"], output_id, attempt, decision,
+                       step2_prompt=parsed.get("step_2_image_prompt"), image_path=failed_path)
         if decision.get("passed"):
             _set_qc_status(persona["id"], scenario_uuid, "passed", None, attempt)
             print(f"   product   ✓{dtxt} (QC pass on attempt {attempt})")

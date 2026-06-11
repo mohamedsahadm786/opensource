@@ -401,6 +401,7 @@ function Lightbox({ rows, index, onIndex, onClose, onMirror, onMirrorImage, onRa
                         <p className="lightbox-date">
                             {formatDate(row.created_at)} · {index + 1} of {rows.length}
                             {!hasVideo && ' · image only'}
+                            {row.qc_status && ` · QC: ${row.qc_status}${row.qc_attempts ? ` (${row.qc_attempts} attempt${row.qc_attempts > 1 ? 's' : ''})` : ''}`}
                         </p>
                     </div>
                 </div>

@@ -31,7 +31,7 @@ export function usePublishingForAccount(accountId /*, tenantId */) {
         const { data: outputs, error: oErr } = await supabase
             .from('outputs')
             .select(`
-                id, created_at, scenario_id, scenario_key, scenario_title, persona_id, qc_status, status,
+                id, created_at, scenario_id, scenario_key, scenario_title, persona_id, qc_status, attempts, status,
                 step3_asset_id, step2_asset_id, final_image_asset_id,
                 videos ( id, final_video_asset_id, dialogue, wan_motion_prompt, created_at, status )
             `)
@@ -51,6 +51,7 @@ export function usePublishingForAccount(accountId /*, tenantId */) {
                     scenario_id: o.scenario_key || o.scenario_id,
                     scenario_title: o.scenario_title,
                     qc_status: o.qc_status,
+                    qc_attempts: o.attempts || null,
                     image_file_id: null,
                     image_url: null,
                     image_storage_url: null,
