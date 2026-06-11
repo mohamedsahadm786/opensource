@@ -108,11 +108,16 @@ between them read as human; constant motion of every body part reads as artifici
 little, then HOLD, then a small intentional move. Stillness is good.
 
 **AUTHOR FROM THE POSE GROUND TRUTH (when provided — authoritative):** describe the person,
-hands, product, and framing exactly as the ground truth says they are. Never instruct a hand
-that is occupied (a phone hand stays exactly as it is, holding the phone). If the product rests
-on a surface, it stays exactly where it is — the performance is presence + camera only, and the
-product gets at most a calm glance. If the ground truth conflicts with the SCENE description,
-the ground truth wins.
+hands, product, and framing exactly as the ground truth says they are. **State EVERY hand
+EXACTLY as the ground truth describes it — never simplify or relocate a hand:** if it says BOTH
+hands hold the product (e.g. one cupping the bottom, one steadying a corner), the motion prompt
+must say both hands hold it exactly that way — never reduce a two-handed hold to one hand, and
+never move a hand to a resting position the ground truth does not describe (a wrongly-described
+hand gives the video model a contradiction with the pixels and invites drift). Never instruct a
+hand that is occupied (a phone hand stays exactly as it is, holding the phone). If the product
+rests on a surface, it stays exactly where it is — the performance is presence + camera only,
+and the product gets at most a calm glance. If the ground truth conflicts with the SCENE
+description, the ground truth wins.
 
 **PRODUCT-FORWARD (this is an ad — highest priority):** the product stays clearly visible and
 central in every shot, and the performance is always oriented to *presenting* it — holding it

@@ -27,6 +27,15 @@ Review this image. Be lenient on photographic imperfections, ABSOLUTELY STRICT o
 
 NOTE on intent: use the intent ONLY to decide held-vs-placed. If the intent names a specific hand or side ("left hand", "right side"), IGNORE that detail — mirror scenes flip sides and either hand is acceptable. Never count limbs or fail placement because the "wrong" hand holds the product.
 
+IMAGES: the FIRST image is the full frame. Any images AFTER it are MAGNIFIED TILES of the
+central hand/product band — they show finger detail the full frame cannot resolve. Do the
+finger-quality judgement (fusion, clusters, counts) from the TILES; do the whole-frame census
+(how many hands, where, holding what) from the full frame. In the census, for EACH hand you must
+state — judged at the magnified tiles — how many individual fingers you can clearly separate and
+whether their boundaries are distinct. If the visible fingers of a hand cannot be separated into
+clearly distinct individual fingers (a merged fan, a stack of parallel ridge segments, a clubbed
+group), that hand is malformed — report it, do not rationalize it as "a natural fold".
+
 STEP 1 — LIMB CENSUS (mandatory, BEFORE any judgement; this is where AI leftovers hide, so be exhaustive):
 - limb_description.hands: a NUMBERED inventory of EVERY hand-like mass on the REAL foreground person. Scan systematically: top-left → top-right → bottom-left → bottom-right. For EACH hand write one numbered entry: "Hand 1: <location in frame> — <what it does / holds> — connects to <left arm | right arm | NO VISIBLE ARM>". Hands gripping the product, hands holding a phone or any object, hands at sides, and hands with no visible arm ALL get entries. Do not merge two hands into one entry because they are close together. Hands seen ONLY inside a mirror reflection get NO number at all — after the numbered list, mention them separately as "Reflection: <description>" (never write "Hand N" for a reflection). Only number a hand whose pixels you can actually see: never add an entry because the pose "implies" another hand must exist.
 - limb_description.arms: how many arms, where each connects, whether any is attached at an impossible place, bends impossibly, or ENDS MID-FRAME without a hand (an arm cut by the image border is fine).
@@ -41,10 +50,17 @@ STEP 2 — JUDGE using your census. If total_visible_hands is greater than 2, ha
 ANATOMY (zero tolerance):
 1. person_count: how many distinct real people are visible? (Expected: 1 — unless the INTENDED PLACEMENT says a flat-lay/no-person composition, in which case 0 is correct. A mirror reflection of the same person is NOT a second person.)
 2. has_extra_limbs: based on the census — more than 2 hands, OR more than 2 arms, OR more than 2 legs on the REAL person (mirror reflections excluded)? A third hand holding a phone or gripping the product counts. A hand with no visible arm counts. Do NOT excuse a rendered hand as "partially hidden" — if a hand-like mass is visible on the real person, it counts. (expected: false)
-3. has_malformed_hand: any ONE hand with a doubled palm, a second palm on the same wrist, an extra hand-shaped mass, or attached at an impossible place? (expected: false)
+3. has_malformed_hand: any ONE hand with a doubled palm, a second palm on the same wrist, an extra hand-shaped mass, attached at an impossible place — OR fingers partially FUSED, clubbed, or clustered: judge this at the ZOOMED CROPS — if the visible fingers of one hand form a merged group where individual finger boundaries cannot be clearly separated, or the hand shows MORE parallel finger-like ridge segments than a natural fold produces, that is a malformed hand. (A natural fold of fingers seen from the back IS fine when each finger is distinguishable; fingers hidden behind the product are fine — judge only the VISIBLE ones.) (expected: false)
 4. has_malformed_arm_or_leg: any arm or leg doubled, fused, bent impossibly, or attached at the wrong place? (expected: false)
 5. has_truncated_limb: any arm or leg that ENDS INSIDE THE FRAME without a hand/foot (stump in open space, limb dissolving into the background)? Limbs cut by the IMAGE BORDER are normal framing — answer false for those. (expected: false)
 6. has_blatant_finger_blunder: any ONE hand showing 6 OR MORE clearly visible fingers, or fingers fused into a single mass? Fingers hidden behind the product are NORMAL — never flag low counts. (expected: false)
+6b. hand_render_quality: judge at the MAGNIFIED TILES and score 1-10 how well the WORST visible hand is rendered, calibrated for a PREMIUM PRODUCT AD a viewer may inspect closely:
+    - 9-10: crisp, natural fingers — every visible finger individually distinct with clean boundaries.
+    - 7-8: natural hand, slightly soft edges, but each finger still clearly separable.
+    - 5-6: mushy/doughy — finger boundaries blur together in places; a stack of soft parallel ridges; a close look says "AI hand".
+    - 3-4: partially fused/clubbed cluster — several fingers cannot be separated.
+    - 1-2: clearly deformed mass.
+    Score the rendering of what is VISIBLE — fingers hidden behind the product do not lower the score. Be strict: if you find yourself writing "soft", "merged", "blurred boundaries" or "ridge-like" about the fingers, the score is 6 or below.
 7. face_grossly_distorted: face severely distorted, melted, doubled, or missing? Minor asymmetry or soft focus is fine. (expected: false)
 
 PLACEMENT & GRIP (judge against the INTENDED PLACEMENT above; zero tolerance on physical logic):
@@ -85,6 +101,7 @@ Respond with EXACTLY this JSON, no extra keys:
   "person_count": <int>,
   "has_extra_limbs": <bool>,
   "has_malformed_hand": <bool>,
+  "hand_render_quality": <int 1-10>,
   "has_malformed_arm_or_leg": <bool>,
   "has_truncated_limb": <bool>,
   "has_blatant_finger_blunder": <bool>,

@@ -17,6 +17,7 @@ CLI (standalone test on an already-stored composite):
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import re
@@ -34,6 +35,9 @@ load_dotenv(HERE / ".env")
 # rationalized a third hand away twice; Opus 4.7 counted it correctly and produced
 # precise retry feedback. ~2 cents/check more — far cheaper than one bad video.
 QC_MODEL = os.environ.get("QC_MODEL", "claude-opus-4-7")
+# minimum hand_render_quality (1-10, judged on the zoom tiles) — below this fails.
+# 7 = "every finger clearly separable". Lower via env if it over-fires.
+HAND_QUALITY_MIN = int(os.environ.get("QC_HAND_QUALITY_MIN", "7"))
 RULES_DIR = Path(os.environ.get("RULES_DIR", HERE / "rules"))
 _sb: Client | None = None
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
@@ -136,7 +140,16 @@ def _score(result: dict, product_strings: str, expect_person: bool = True) -> di
     if result.get("has_extra_limbs"):
         defects.append("show exactly two arms, two hands and two legs — no extra limbs")
     if result.get("has_malformed_hand"):
-        defects.append("each wrist has exactly one clean natural hand with one palm — no doubled or extra palms")
+        defects.append("each hand must be clean and natural with clearly separated individual fingers — no fused, clubbed, or clustered finger groups, no doubled or extra palms")
+    # scored hand gate (the binary 'malformed' question gets rationalized on
+    # borderline fused clusters — a 1-10 scale judged on the zoom tiles does not):
+    hq = result.get("hand_render_quality")
+    try:
+        if hq is not None and int(hq) < HAND_QUALITY_MIN:
+            defects.append("render both hands with crisp, clearly separated individual fingers — "
+                           f"no soft merged finger boundaries (hand render quality {hq}/10, need {HAND_QUALITY_MIN}+)")
+    except (TypeError, ValueError):
+        pass
     if result.get("has_malformed_arm_or_leg"):
         defects.append("keep every arm and leg natural, separate, and attached at the correct place")
     if result.get("has_truncated_limb"):
@@ -179,7 +192,7 @@ def _score(result: dict, product_strings: str, expect_person: bool = True) -> di
     if rec not in ("use", "regenerate", "discard"):
         rec = "use" if passed else "regenerate"
     keys = ["total_visible_hands", "held_objects", "person_count", "has_extra_limbs",
-            "has_malformed_hand", "has_malformed_arm_or_leg",
+            "has_malformed_hand", "hand_render_quality", "has_malformed_arm_or_leg",
             "has_truncated_limb", "has_blatant_finger_blunder", "face_grossly_distorted",
             "placement_illogical", "product_visible", "multiple_distinct_products",
             "product_shape_broken", "product_proportions_wrong", "product_scale_wrong",
@@ -197,21 +210,63 @@ def _score(result: dict, product_strings: str, expect_person: bool = True) -> di
     }
 
 
+# torso-band zoom tiles: (left, top, right, bottom) as fractions. Hands holding a
+# product (and surface-placed products beside laps/tables) live in this band in
+# every scenario archetype. Two overlapping halves -> each hand lands fully in at
+# least one tile at ~3x effective zoom. Deterministic on purpose: a model-located
+# bounding box hallucinated (pointed at the shorts, 2026-06-11), so the gate must
+# never depend on model coordinates.
+_ZOOM_TILES = [(0.00, 0.20, 0.62, 0.65), (0.38, 0.20, 1.00, 0.65)]
+
+
+def _zoom_crops(image_bytes: bytes) -> list[bytes]:
+    """Magnified tiles of the hand/product band — the finger census happens at THIS
+    zoom (full-frame hands are ~80px; partial finger fusion is invisible there, as
+    the 2026-06-11 patio audit proved). Never fatal."""
+    try:
+        from PIL import Image
+    except ImportError:
+        print("[qc] (warn) Pillow missing — hand zoom disabled")
+        return []
+    crops: list[bytes] = []
+    try:
+        im = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        w, h = im.size
+        for (lf, tf, rf, bf) in _ZOOM_TILES:
+            c = im.crop((int(lf * w), int(tf * h), int(rf * w), int(bf * h)))
+            if c.width < 16 or c.height < 16:
+                continue
+            scale = max(1.0, min(3.0, 1568 / max(c.width, c.height)))
+            if scale > 1.0:
+                c = c.resize((int(c.width * scale), int(c.height * scale)), Image.LANCZOS)
+            buf = io.BytesIO()
+            c.save(buf, "JPEG", quality=90)
+            crops.append(buf.getvalue())
+    except Exception as e:
+        print(f"[qc] hand-crop skipped: {type(e).__name__}: {e}")
+    return crops
+
+
 def validate(image_bytes: bytes, media_type: str, product: dict, api_key: str,
              scenario_id: str = "?", intent: str | None = None) -> dict:
     """Run QC (lenient on photography, zero-tolerance on anatomy/physics).
     On any QC-infrastructure error, treat as PASS (don't punish the image)."""
     system, rubric = _prompts(product, intent)
     expect_person = "flat_lay" not in (intent or "")
+    crops = _zoom_crops(image_bytes) if expect_person else []
+    if crops:
+        print(f"[qc] {scenario_id}: {len(crops)} hand-zoom crop(s) attached")
     print(f"[qc] {scenario_id}: validating via {QC_MODEL}…")
     try:
+        content = [{"type": "image", "source": {"type": "base64", "media_type": media_type,
+                                                "data": base64.b64encode(image_bytes).decode()}}]
+        content += [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                 "data": base64.b64encode(c).decode()}}
+                    for c in crops]
+        content.append({"type": "text", "text": rubric})
         resp = Anthropic(api_key=api_key).messages.create(
             model=QC_MODEL, max_tokens=1500, system=system,
-            messages=[{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": media_type,
-                                             "data": base64.b64encode(image_bytes).decode()}},
-                {"type": "text", "text": rubric},
-            ]}])
+            messages=[{"role": "user", "content": content}])
         result = _parse_json(resp.content[0].text)
     except Exception as e:
         print(f"[qc] {scenario_id}: QC ERROR — {type(e).__name__}: {e} (treating as pass)")
