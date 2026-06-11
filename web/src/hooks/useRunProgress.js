@@ -3,6 +3,11 @@ import { supabase } from '../lib/supabase.js';
 
 const POLL_INTERVAL_MS = 8_000;
 const STALL_TIMEOUT_MS = 30 * 60 * 1000;   // job still 'running' but ZERO activity this long -> likely hung
+// The video/script stage legitimately goes silent for 30-90+ min (Wan + TTS +
+// lipsync write NO db rows until the mp4 is done), so it gets the pod's own
+// job timeout (3 h) before we call it hung — fixes the false "Run stalled"
+// pill that fired 30 min into every normal video render.
+const VIDEO_STALL_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 
 // Polls a run's progress. Completion / failure are driven by the durable JOB the
 // worker updates (jobs.status = 'succeeded' | 'failed') — NOT a heuristic, so the
@@ -75,9 +80,12 @@ export function useRunProgress(runStartedAt, jobId = null) {
                     setStalled(false);
                 } else if (jobStatus === 'failed') {
                     setStalled(true);
-                } else if (quiet > STALL_TIMEOUT_MS) {
-                    // Last-resort safety net: no rows AND no stage change for 30 min -> probably hung.
-                    setStalled(true);
+                } else {
+                    // Last-resort safety net: no rows AND no stage change for too long
+                    // -> probably hung. Stage-aware: video/script renders are silent by
+                    // design, so they get the long window.
+                    const window = (stage === 'video' || stage === 'script') ? VIDEO_STALL_TIMEOUT_MS : STALL_TIMEOUT_MS;
+                    setStalled(quiet > window);
                 }
             } catch (err) {
                 console.error('[Alluvi] run progress poll failed', err);
