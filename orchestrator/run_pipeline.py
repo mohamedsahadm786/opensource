@@ -285,14 +285,22 @@ def do_product(account, persona, scenario_uuid, scenario_key, scenario_spec, api
     return False
 
 
+# web-tunable Stage-3 knobs (tenant_pipeline_config.realism_denoise /
+# realism_lora_strength, migration 022) — set in main(); empty dict = pod defaults
+REALISM_PARAMS: dict = {}
+
+
 def do_realism(account, persona, scenario_uuid, scenario_key):
     if _stage_done(persona["id"], scenario_uuid, "step3_asset_id"):
         print("   realism   ✓ (already done)"); return
     progress("step3")
     mask_prompt = RS3.get_mask_prompt(account["tenant_id"])
-    job_id = RS3.enqueue_step3({
+    payload = {
         "tenant_id": account["tenant_id"], "account_id": account["id"], "persona_id": persona["id"],
-        "scenario_id": scenario_uuid, "scenario_key": scenario_key, "mask_prompt": mask_prompt})
+        "scenario_id": scenario_uuid, "scenario_key": scenario_key, "mask_prompt": mask_prompt}
+    if REALISM_PARAMS:
+        payload["realism_params"] = REALISM_PARAMS
+    job_id = RS3.enqueue_step3(payload)
     d = _dur(_ok(_poll(job_id), "realism"))
     print(f"   realism   ✓" + (f" ({d:.0f}s)" if d else ""))
 
@@ -440,6 +448,11 @@ def main() -> None:
         STEP3_ENABLED = bool(cfg["step_3_enabled"])
     if (cfg or {}).get("qc_enabled") is not None:
         QC_ENABLED = bool(cfg["qc_enabled"])
+    # optional realism knobs (null = pod defaults; payload key omitted entirely)
+    if (cfg or {}).get("realism_denoise") is not None:
+        REALISM_PARAMS["denoise"] = float(cfg["realism_denoise"])
+    if (cfg or {}).get("realism_lora_strength") is not None:
+        REALISM_PARAMS["lora_strength"] = float(cfg["realism_lora_strength"])
 
     n_scen = args.scenarios if args.scenarios is not None else int((cfg or {}).get("num_videos_per_account") or 1)
     controls = RV.resolve_controls(cfg, _CtlArgs(args))

@@ -21,6 +21,8 @@ const EMPTY = {
     seed: null,
     step_3_enabled: true,
     qc_enabled: true,
+    realism_denoise: '',           // optional — empty = pod default (0.30)
+    realism_lora_strength: '',     // optional — empty = pod default (0.7)
 };
 
 export function isPipelineConfigComplete(c) {
@@ -78,6 +80,8 @@ export function usePipelineConfig(tenantId) {
             seed: numOrNull(draft.seed),
             step_3_enabled: Boolean(draft.step_3_enabled),
             qc_enabled: Boolean(draft.qc_enabled),
+            realism_denoise: numOrNull(draft.realism_denoise),
+            realism_lora_strength: numOrNull(draft.realism_lora_strength),
             updated_at: new Date().toISOString(),
         };
         const { data, error: err } = await supabase

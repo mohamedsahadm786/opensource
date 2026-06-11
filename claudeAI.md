@@ -76,4 +76,69 @@ VERIFY
 NOTE for the repo side (not the pod): once per-attempt rows exist, the web's
 `useOutputDebug` should prefer the LATEST image_generations row per stage (order by
 created_at desc) so the debug panel shows the prompt that actually produced the stored
-image. Check this after the pod fix lands.
+image. Check this after the pod fix lands. (DONE 2026-06-11 — debug panel shows
+per-attempt prompts with the final one labeled.)
+
+---
+
+## TASK 2 — per-request realism knobs (denoise + LoRA strength) (status: PENDING)
+
+Copy-paste everything between the lines to the pod Claude:
+
+------------------------------------------------------------------------------------
+
+CONTEXT
+You maintain the Alluvi GPU-pod services: /workspace/alluvi-gateway (FastAPI app.py +
+worker.py) and the realism service (port 8194), which wrap the repo at
+/workspace/alluvi-clean. The repo's src/step_3_realism.py reads its tuning constants
+from MODULE-LEVEL globals at workflow-build time (DENOISE, default 0.30, and
+LORA_STRENGTH, default 0.7 — see _build_workflow), so they can be monkey-patched
+per request exactly like the qwen-service already monkey-patches
+q.PRODUCT_ANGLE_IMAGE_PATH for the Picture-3 feature.
+
+WHAT CHANGED ON THE ORCHESTRATOR SIDE (already live)
+The web Run-settings now has two optional Stage-3 knobs stored on
+tenant_pipeline_config (migration 022): realism_denoise and realism_lora_strength.
+When the tenant has set them, run_pipeline.py adds this to the step3 job payload:
+  "realism_params": {"denoise": <float>, "lora_strength": <float>}
+(one or both keys; the key is OMITTED ENTIRELY when the tenant set nothing —
+payloads without realism_params must behave byte-identically to today).
+
+YOUR TASK
+1. /workspace/alluvi-gateway/worker.py — in handle_step3, read
+   p.get("realism_params") and, when present, forward it in the JSON body of the
+   POST to the realism service's /step3/generate as "realism_params".
+2. The realism service (port 8194) app.py — accept the optional "realism_params"
+   object. On EVERY request, set the module globals UNCONDITIONALLY before
+   generating (no leakage between requests):
+     import step_3_realism as r   # or however the module is imported there
+     rp = body.get("realism_params") or {}
+     r.DENOISE       = float(rp.get("denoise", DEFAULT_DENOISE))
+     r.LORA_STRENGTH = float(rp.get("lora_strength", DEFAULT_LORA_STRENGTH))
+   where DEFAULT_* are captured ONCE at service startup from the module's import-time
+   values (which already honor the REALISM_DENOISE / REALISM_LORA_STRENGTH env vars).
+   Setting unconditionally on every request is the multi-tenant-safe pattern — a
+   request without knobs must always run with the startup defaults, never with a
+   previous request's values.
+3. Log one line per request showing the effective values, e.g.
+   [realism] denoise=0.30 lora=0.70 (defaults)  /  [realism] denoise=0.45 lora=0.70 (per-request)
+
+CONSTRAINTS
+- Do NOT change CFG, STEPS, the mask params, the prompts, the workflow template,
+  storage paths, or any other handler.
+- Clamp sanity: denoise to [0.05, 0.95], lora_strength to [0.0, 2.0]; out-of-range
+  values clamp, never error the job.
+- Backward compatible: a payload without realism_params = today's behavior exactly.
+- Remember /workspace/alluvi-clean is NOT a git clone — if you need the current
+  step_3_realism.py, curl the raw GitHub file; back up before replacing anything.
+
+VERIFY
+1. Run a step3 with NO knobs set → the service log must show the default line and
+   the output image must look as before.
+2. Set realism_denoise=0.45 in the web Run settings, re-run a step3 → the log must
+   show denoise=0.45, and jobs.request_payload for that job (the owner checks from
+   the PC) must contain realism_params.denoise=0.45.
+3. Immediately run another step3 WITHOUT knobs → log shows defaults again (no
+   leakage).
+
+------------------------------------------------------------------------------------

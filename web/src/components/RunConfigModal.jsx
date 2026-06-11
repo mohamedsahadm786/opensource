@@ -154,6 +154,26 @@ export function RunConfigModal({ open, config, accounts = [], tenantId, onClose,
                                 <input type="checkbox" checked={Boolean(form.step_3_enabled)} onChange={(e) => set('step_3_enabled', e.target.checked)} />
                                 <span>Stage 3 realism pass</span>
                             </label>
+                            {Boolean(form.step_3_enabled) && (
+                                <div className="field-row">
+                                    <label className="field">
+                                        <span className="field-label">Realism strength (denoise) <span className="field-opt">(default 0.30)</span></span>
+                                        <div className="field-input">
+                                            <input type="number" min="0" max="1" step="0.01" placeholder="0.30"
+                                                value={form.realism_denoise ?? ''}
+                                                onChange={(e) => set('realism_denoise', e.target.value)} />
+                                        </div>
+                                    </label>
+                                    <label className="field">
+                                        <span className="field-label">Skin LoRA strength <span className="field-opt">(default 0.7)</span></span>
+                                        <div className="field-input">
+                                            <input type="number" min="0" max="2" step="0.05" placeholder="0.7"
+                                                value={form.realism_lora_strength ?? ''}
+                                                onChange={(e) => set('realism_lora_strength', e.target.value)} />
+                                        </div>
+                                    </label>
+                                </div>
+                            )}
                             <label className="toggle-row">
                                 <input type="checkbox" checked={Boolean(form.qc_enabled)} onChange={(e) => set('qc_enabled', e.target.checked)} />
                                 <span>QC validation + retry</span>
