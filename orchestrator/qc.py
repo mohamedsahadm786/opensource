@@ -123,8 +123,14 @@ def _score(result: dict, product_strings: str, expect_person: bool = True) -> di
     except (TypeError, ValueError):
         hands = 0
     census = str((result.get("limb_description") or {}).get("hands") or "")
-    listed = [int(n) for n in re.findall(r"[Hh]and\s*(\d+)", census)]
-    hands = max([hands] + listed) if listed else hands
+    # one census part per "Hand N:" entry; drop mirror-reflection entries (the
+    # rubric tells the model not to number them, but belt-and-braces here too)
+    parts = re.split(r"(?=[Hh]and\s*\d+\s*[:(])", census)
+    real = [p for p in parts
+            if re.match(r"[Hh]and\s*\d+", p)
+            and "reflection" not in p.lower() and "not counted" not in p.lower()]
+    listed = {int(re.match(r"[Hh]and\s*(\d+)", p).group(1)) for p in real}
+    hands = max(hands, len(listed)) if listed else hands
     if hands > 2:
         defects.append(f"show exactly two hands — the image contains {hands} (remove the leftover extra hand)")
     if result.get("has_extra_limbs"):
@@ -150,7 +156,7 @@ def _score(result: dict, product_strings: str, expect_person: bool = True) -> di
     if result.get("product_proportions_wrong"):
         defects.append("keep the box's real proportions — a wide landscape rectangle, never square")
     if not result.get("product_text_legible", True):
-        defects.append(f"the brand and product name must be clearly legible and correct: {product_strings}")
+        defects.append(f"the brand and product name wordmarks must be clearly recognizable (clean English letters): {product_strings}")
     if not result.get("box_theme_ok", True):
         defects.append("the product box packaging must match the reference shape, colours and graphics")
     if result.get("product_scale_wrong"):
