@@ -7,7 +7,7 @@
 
 ---
 
-## TASK 1 — image_generations must record EVERY Step-2 attempt (status: PENDING)
+## TASK 1 — image_generations must record EVERY Step-2 attempt (status: DONE 2026-06-11 — verified: 14 step2 rows, one per attempt, correct attempt_number + fresh seeds)
 
 Copy-paste everything between the lines to the pod Claude:
 
