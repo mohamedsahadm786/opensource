@@ -454,6 +454,8 @@ def main() -> None:
         REALISM_PARAMS["denoise"] = float(cfg["realism_denoise"])
     if (cfg or {}).get("realism_lora_strength") is not None:
         REALISM_PARAMS["lora_strength"] = float(cfg["realism_lora_strength"])
+    # visible in the run_worker terminal — proves which knob snapshot this run took
+    print(f"[pipeline] realism knobs: {REALISM_PARAMS or 'none (pod defaults)'}")
 
     n_scen = args.scenarios if args.scenarios is not None else int((cfg or {}).get("num_videos_per_account") or 1)
     controls = RV.resolve_controls(cfg, _CtlArgs(args))
