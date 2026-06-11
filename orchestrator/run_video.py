@@ -113,6 +113,25 @@ def get_scenario_spec(scenario_id: str) -> dict:
     return (rows[0].get("spec") or {}) if rows else {}
 
 
+def get_pose_prompt(output: dict) -> str | None:
+    """POSE GROUND TRUTH (V2, video.md): the step-2 image prompt that produced the
+    photo being animated. Highest attempt = the prompt of the STORED composite
+    (the pod overwrites step2.jpg per QC retry). Falls back to the qc_checks copy;
+    returns None for legacy outputs (script brain then behaves as before)."""
+    aid = output.get("step2_asset_id")
+    if aid:
+        rows = (sb().table("image_generations").select("prompt,attempt_number")
+                .eq("output_asset_id", aid).eq("stage_name", "step2")
+                .order("attempt_number", desc=True).order("created_at", desc=True)
+                .limit(1).execute().data)
+        if rows and rows[0].get("prompt"):
+            return rows[0]["prompt"]
+    rows = (sb().table("qc_checks").select("step2_prompt,attempt_number")
+            .eq("output_id", output["id"])
+            .order("attempt_number", desc=True).limit(1).execute().data)
+    return rows[0]["step2_prompt"] if rows and rows[0].get("step2_prompt") else None
+
+
 def get_pipeline_config(tenant_id: str) -> dict:
     rows = sb().table("tenant_pipeline_config").select("*").eq("tenant_id", tenant_id).limit(1).execute().data
     return rows[0] if rows else {}
@@ -232,13 +251,15 @@ def main() -> None:
           f"-> {controls['num_shots']} shot(s) x {controls['shot_seconds']}s")
 
     api_key = get_anthropic_key(tenant_id)
+    pose = get_pose_prompt(output)
+    print(f"[video] pose ground truth: {'found (' + str(len(pose.split())) + 'w)' if pose else 'none (legacy output)'}")
     print(f"[video] script -> {OPUS_MODEL}")
     res = SG.generate_script(
         company_info=company_info, product_info=product_info, directives=directives,
         persona=account, scenario_key=scenario_key, scenario_spec=scenario_spec,
         num_shots=controls["num_shots"], target_seconds=controls["shot_seconds"],
         api_key=api_key, rule_book=(RULES_DIR / "script.md").read_text(encoding="utf-8"),
-        model=OPUS_MODEL)
+        model=OPUS_MODEL, pose_prompt=pose)
     parsed, stats = res["parsed"], res["stats"]
     log_llm_call(tenant_id, res["user_message"], res["raw"], res["usage"], parsed)
 

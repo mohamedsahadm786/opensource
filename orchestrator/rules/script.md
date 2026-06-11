@@ -21,6 +21,10 @@ The user message gives, as your ONLY content sources:
   include, prioritize, and avoid. Treat these as HARD constraints that override defaults.
 - **PERSONA**, **SCENE**, **NUM_SHOTS**, **TARGET_SECONDS_PER_SHOT**, and the word targets
   (**TARGET_TOTAL_WORDS**, **WORDS_PER_SHOT**) you MUST hit.
+- **POSE GROUND TRUTH** (when present) — the REAL content of the single photo every shot
+  animates: which hand holds the product, where the other hand is, whether a phone is present,
+  whether the product rests on a surface, the framing. This is authoritative over your
+  imagination: author every motion FROM it, never invent a different pose.
 
 Use the `brand_name` and `product_name` exactly as given in the knowledge. Never invent a brand
 or product name, and never substitute your own.
@@ -76,10 +80,39 @@ outfit, location, lighting, and the product they hold — from the SCENE. Do not
 - Natural punctuation only. No em-dashes, ellipses, emojis, hashtags. Advance the thought across
   beats; no repeats.
 
+## 4b. THE SHOT PLAN (`shot_plan`) — direct the sequence like ONE performance
+
+Before writing any motion prompt, write a `shot_plan`: one line per shot naming (a) the camera
+move and (b) the performance note for that beat. Design it the way a human director thinks about
+ONE continuous performance seen through cuts:
+
+- **A gesture happens AT MOST ONCE across the whole video.** Every shot restarts from the same
+  photo, so if two shots both "tilt the product toward the lens", the viewer sees the same
+  gesture twice and the illusion dies. Place each intentional gesture (the wrist-tilt show, a
+  glance down to the product) in exactly ONE beat — the beat whose dialogue calls for it — and
+  never repeat it.
+- **Most beats are presence, not gestures.** Real creators spend most of a video simply standing
+  and talking: easy breathing, natural blinks, a living expression — and nothing else moving.
+  That is a complete, correct motion prompt for a beat. Gestures are salt, not the meal; a
+  4-shot video usually carries one, at most two, gestures TOTAL.
+- **Energy follows the narrative arc**, subtly: the hook beat slightly more alive, the
+  reflection beat calmest, the landing beat warm and settled. Never a big energy jump.
+- **The camera provides the visual variety, the body provides less.** Give each shot a DIFFERENT
+  named camera move that fits its beat (the most intimate line gets the closest/slowest move);
+  the sequence of moves must feel directed and never contradictory.
+- Each `wan_motion_prompt` then IMPLEMENTS its shot_plan line.
+
 ## 5. PER-SHOT WAN MOTION PROMPT (`wan_motion_prompt`) — NATURAL, PRODUCT-FORWARD PERFORMANCE
 The #1 rule, confirmed by how Wan behaves: **a few small intentional movements with stillness
 between them read as human; constant motion of every body part reads as artificial.** Move a
 little, then HOLD, then a small intentional move. Stillness is good.
+
+**AUTHOR FROM THE POSE GROUND TRUTH (when provided — authoritative):** describe the person,
+hands, product, and framing exactly as the ground truth says they are. Never instruct a hand
+that is occupied (a phone hand stays exactly as it is, holding the phone). If the product rests
+on a surface, it stays exactly where it is — the performance is presence + camera only, and the
+product gets at most a calm glance. If the ground truth conflicts with the SCENE description,
+the ground truth wins.
 
 **PRODUCT-FORWARD (this is an ad — highest priority):** the product stays clearly visible and
 central in every shot, and the performance is always oriented to *presenting* it — holding it
@@ -161,6 +194,7 @@ Return **STRICT JSON only** — no markdown, no backticks, no commentary:
   "continuity_block": "<30-50 word fixed-look description, same for all shots>",
   "hook_style": "<one value from the brand hook_styles>",
   "scene_mood": "<one value from the brand scene_moods>",
+  "shot_plan": ["<shot 1: named camera move + performance note>", "<shot 2: ...>"],
   "shots": [
     {
       "dialogue": "<line; combined across shots hits TARGET_TOTAL_WORDS; brand named ~2x total>",

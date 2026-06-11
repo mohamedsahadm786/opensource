@@ -267,10 +267,14 @@ post-step in the video-service — biggest perceptual win per GPU-second.
 
 ## 8. Verification ledger (update as phases land)
 
-- [ ] V1a BASE_NEGATIVE fixed + pod curl'd + one render eyeballed
-- [ ] V1b script.md motion doctrine hardened + dry-run reviewed
-- [ ] V2 pose ground truth in the script user message (llm_calls verified)
-- [ ] V3 shot_plan emitted + 4-shot arc watched
+- [x] V1a BASE_NEGATIVE fixed + pod curl'd + service restarted (2026-06-11; render eyeball pending owner review)
+- [x] V1b script.md motion doctrine hardened + dry-run reviewed (2026-06-11)
+- [x] V2 pose ground truth in the script user message — implemented in script_gen/run_video/run_pipeline;
+      dry-run verified: 392w step-2 prompt reached the brain, all shots use the real pose (2026-06-11)
+- [x] V3 shot_plan emitted — PLUS performance-continuity doctrine (§4b: a gesture happens at most
+      ONCE across the video; most beats are presence-only; energy follows the arc; camera provides
+      the variety). Dry-run verified: 4 distinct named moves, wrist-tilt only in the product beat,
+      one pure-presence beat (2026-06-11). 4-shot rendered video watch still pending.
 - [ ] V4 InfiniteTalk PoC side-by-side verdict: ______
 - [ ] V7(§7) quality mode + RIFE measured: render-time x___, verdict: ______
 - [ ] V6 fine-tune go/no-go decision with rating evidence: ______

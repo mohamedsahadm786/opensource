@@ -82,13 +82,29 @@ def _scene_from_scenario(scenario_key: str, spec: dict) -> dict:
 
 
 def build_user_message(blocks: dict, persona: dict, scenario_key: str, scenario_spec: dict,
-                       num_shots: int, target_seconds: int) -> tuple[str, dict]:
+                       num_shots: int, target_seconds: int,
+                       pose_prompt: str | None = None) -> tuple[str, dict]:
     total_target_seconds = num_shots * target_seconds
     target_total_words = round(total_target_seconds * WORDS_PER_SECOND)
     words_per_shot = max(1, round(target_total_words / max(1, num_shots)))
 
     persona_block = {k: persona.get(k) for k in ("name", "gender", "country", "language", "age")}
     scene_block = _scene_from_scenario(scenario_key, scenario_spec)
+
+    # POSE GROUND TRUTH (V2, video.md): the real content of the photo every shot
+    # animates — the step-2 image prompt + the scenario's placement intent. When
+    # absent (legacy outputs), the block is omitted and behavior is unchanged.
+    pose_parts = []
+    grip = (scenario_spec or {}).get("grip_or_placement")
+    if grip:
+        pose_parts.append(f"Intended product placement in the photo: {grip}")
+    if pose_prompt:
+        pose_parts.append("The exact image-generation prompt that produced the photo "
+                          "(this describes what the photo actually shows — hands, product, "
+                          "phone, surfaces, framing):\n" + str(pose_prompt).strip())
+    pose_block = ("\n\nPOSE GROUND TRUTH (the REAL content of the single photo that EVERY "
+                  "shot animates — author all motion FROM this, never from imagination):\n"
+                  + "\n\n".join(pose_parts)) if pose_parts else ""
 
     user_message = (
         "BRAND KNOWLEDGE (company/brand — content source):\n"
@@ -99,6 +115,7 @@ def build_user_message(blocks: dict, persona: dict, scenario_key: str, scenario_
         + json.dumps(blocks.get("directives", {}), indent=2, ensure_ascii=False)
         + "\n\nPERSONA:\n" + json.dumps(persona_block, indent=2, ensure_ascii=False)
         + "\n\nSCENE:\n" + json.dumps(scene_block, indent=2, ensure_ascii=False)
+        + pose_block
         + f"\n\nNUM_SHOTS: {num_shots}"
         + f"\n\nTARGET_SECONDS_PER_SHOT: {target_seconds}"
         + f"\n\nTOTAL_TARGET_SECONDS: {total_target_seconds}"
@@ -148,14 +165,16 @@ def validate_script(parsed: dict, num_shots: int) -> dict:
 
 def generate_script(*, company_info: dict, product_info: dict, directives: dict, persona: dict,
                     scenario_key: str, scenario_spec: dict, num_shots: int, target_seconds: int,
-                    api_key: str, rule_book: str, model: str) -> dict:
+                    api_key: str, rule_book: str, model: str,
+                    pose_prompt: str | None = None) -> dict:
     """pick 3-source slices -> build prompt -> Claude (Opus) -> parse + validate.
     Returns {parsed, raw, usage, user_message, blocks, prompt_meta, stats}."""
     import anthropic  # lazy so the pure helpers test without the SDK
 
     blocks = assemble_inputs(company_info, product_info, directives)
     user_message, prompt_meta = build_user_message(
-        blocks, persona, scenario_key, scenario_spec, num_shots, target_seconds)
+        blocks, persona, scenario_key, scenario_spec, num_shots, target_seconds,
+        pose_prompt=pose_prompt)
     token_budget = min(32000, DEFAULT_MAX_TOKENS + num_shots * 900)
 
     client = anthropic.Anthropic(api_key=api_key)

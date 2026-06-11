@@ -326,7 +326,7 @@ def pick_scenarios(persona_id: str, n: int) -> list:
 
 
 def finished_images_without_video(persona_id: str, limit: int) -> list:
-    finished = sb().table("outputs").select("id,scenario_id,scenario_key,persona_id,status,qc_status") \
+    finished = sb().table("outputs").select("id,scenario_id,scenario_key,persona_id,status,qc_status,step2_asset_id") \
         .eq("persona_id", persona_id).eq("status", "step3_done").execute().data or []
     # belt-and-braces: a QC-failed output never gets a video (it shouldn't reach
     # step3_done anymore, but guard against legacy/manual rows)
@@ -342,11 +342,12 @@ def do_video(account, persona, output_row, scenario_spec, api_key, sources, cont
     company, product, directives = sources
     scenario_key = output_row.get("scenario_key") or output_row["scenario_id"]
     progress("script")
+    pose = RV.get_pose_prompt(output_row)
     res = SG.generate_script(
         company_info=company, product_info=product, directives=directives,
         persona=account, scenario_key=scenario_key, scenario_spec=scenario_spec,
         num_shots=controls["num_shots"], target_seconds=controls["shot_seconds"],
-        api_key=api_key, rule_book=rule_book, model=OPUS_MODEL)
+        api_key=api_key, rule_book=rule_book, model=OPUS_MODEL, pose_prompt=pose)
     RV.log_llm_call(account["tenant_id"], res["user_message"], res["raw"], res["usage"], res["parsed"])
     payload = RV.build_enqueue_payload(account=account, persona=persona, output=output_row,
                                        controls=controls, parsed=res["parsed"])
