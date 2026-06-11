@@ -86,6 +86,13 @@ central in every shot, and the performance is always oriented to *presenting* it
 clearly, a natural showing gesture, an occasional calm glance to it. **NEVER irrelevant actions**
 (scrolling or checking a phone, looking around the room, fixing hair, glancing away aimlessly).
 
+**THE PRODUCT NEVER MOVES INDEPENDENTLY (iron rule — the model's worst failure mode):**
+the product never leaves the hand (or the surface it rests on), the grip never changes, and
+nothing is ever picked up, put down, lifted, handed over, or released. The hand and the product
+move together as ONE unit, or not at all. If the product rests on a surface, it stays exactly
+where it is — only the person and camera may move. Never write an instruction that requires
+the product to travel, rotate freely, or change how it is held.
+
 **Refer to the subject and product GENERICALLY — never names or guessed forms.** Wan animates the
 photo and does not know names or product types. Call the person "the man"/"the woman"/"he"/"she"/
 "the subject" — NEVER the persona's name. Call the product "the product" or "the item in their
@@ -94,6 +101,8 @@ Wan distort it. (Brand naming lives ONLY in the dialogue, never here.)
 
 **Length scales with TARGET_SECONDS:** ~50-75 words for a 5s shot; ~90-120 words for a 9-10s shot.
 Longer shots get MORE intentional beats and holds — still restrained, never constant motion.
+**HARD CEILING: 200 words** — the video model's text encoder degrades badly past that
+(motion slows, grid artifacts); never stuff the prompt.
 
 RULES:
 - **ONE primary motion at a time, not many at once.** Everything else stays calm and still. Name
@@ -104,16 +113,33 @@ RULES:
   "constantly, continuously, energetically," and NEVER hedge words like "imperceptible".
 - **Match the dialogue:** movement and expression fit the line's meaning and rhythm.
 - **GAZE:** mostly calm, natural eye contact with the camera — it does NOT stare constantly. Once
-  or twice, a brief natural glance to the product (gently turning it as if showing the label,
-  keeping the label readable), then eyes ease back to the camera.
+  or twice, a brief natural glance to the product, then eyes ease back to the camera.
+- **The only safe showing gesture:** a small tilt of the WRIST so the product angles a few
+  degrees toward the lens — hand and product moving as one unit, label kept facing the camera —
+  then it settles and holds. Never "turn the product", "rotate it", "show it around", or any
+  gesture where the product moves relative to the hand.
 - **Expression:** one natural settled expression that may soften slightly (a calm half-smile). Do
   NOT cycle through many expressions.
 - **Mouth closed and relaxed** (LatentSync repaints the mouth; never describe talking or an open
   mouth).
 
-CAMERA (after the body motion, keep it simple): ONE gentle, steady move at a natural pace — a calm
-cinematic push-in or a soft slow drift. Not fast, not slow-motion, not shaky, not floating or
-robotic. Same calm feel across shots.
+CAMERA (after the body motion): ONE gentle, steady move per shot, and **NAME it in explicit
+camera grammar** — the model understands real cinematography language, so direct it like a
+camera operator, not vaguely. Examples of the grammar (NOT a fixed list — choose whatever calm
+move genuinely fits this scene, this shot's dialogue, and the shot's place in the sequence):
+"slow steady dolly-in toward the subject", "gentle lateral drift left, keeping the subject
+centered", "subtle slow push-in on the product in her hand", "calm static camera with a barely
+perceptible handheld sway". Vary the move across shots so the sequence feels directed, never
+contradictory. Not fast, not slow-motion, not shaky, not floating or robotic.
+
+CALIBRATION EXAMPLE (a 5s shot done right — match this register, never copy its content;
+every detail must come from THIS scene and dialogue):
+> The woman holds the product steady at chest level and looks calmly into the camera. She
+> blinks naturally and her expression softens into a small warm smile. Her wrist tilts the
+> product a few degrees toward the lens — hand and product moving as one — then settles. She
+> holds still, breathing easily. Slow steady dolly-in toward her. calm natural human motion,
+> the rest of the body still and relaxed, product clearly visible, mouth closed, face stable,
+> identity preserved, product label stable, cinematic realism
 
 FINISH: end with verbatim:
 `calm natural human motion, the rest of the body still and relaxed, product clearly visible, mouth closed, face stable, identity preserved, product label stable, cinematic realism`.

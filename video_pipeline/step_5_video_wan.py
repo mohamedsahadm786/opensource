@@ -53,15 +53,21 @@ DEFAULT_FPS = 16
 FRAME_CAP = 81
 
 # The proven Wan negative from the tested workflow (standard Wan zh negative +
-# face/teeth/mouth terms). Script negatives are prepended to this.
+# face/teeth/mouth terms), MINUS the template's anti-stillness terms
+# (静态 / 静止 / 静止不动的画面 pushed Wan to INVENT motion — the opposite of a
+# calm ad presenter; products got lifted and left floating; see video.md §2),
+# PLUS anti-float terms (the product must never detach from the hand/surface).
+# Script negatives are prepended to this.
 BASE_NEGATIVE = (
-    "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，"
+    "色调艳丽，过曝，细节模糊不清，字幕，风格，作品，画作，画面，"
     "整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，"
     "画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，"
-    "静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走, "
+    "杂乱的背景，三条腿，背景人很多，倒着走, "
     "face distortion, facial asymmetry, extra teeth, deformed teeth, oversized teeth, "
     "large front teeth, mouth warping, distorted mouth, malformed mouth, teeth artifacts, "
-    "ugly teeth"
+    "ugly teeth, "
+    "product floating, object levitating, hand releasing the product, grip changing, "
+    "object detaching from hand, picking up objects, putting down objects"
 )
 
 
