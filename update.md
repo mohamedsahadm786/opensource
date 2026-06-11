@@ -9,7 +9,130 @@
 
 ---
 
-## v4 — image-quality + QC overhaul (2026-06-10 session — READ THIS FIRST)
+## v5 — QC debug tooling + QC rebalance + realism knobs + VIDEO overhaul (2026-06-11 session — READ THIS FIRST)
+
+> This session: built the failed-image archive + per-attempt debugging, audited and
+> REBALANCED QC (it was over-strict in two ways and under-strict in one), made the
+> realism stage web-tunable, and executed the first three phases of the video-quality
+> overhaul (motion doctrine, pose grounding, shot plan) plus a scored hand-quality QC
+> gate. Commits `0a13f77` → `81e62e8`, all pushed. Where this disagrees with v4 below,
+> this wins. **The video-stage roadmap now lives in `video.md` (PENDING-only, P1–P8) —
+> read it after this.** `pending.md` is STALE — ignore it.
+
+### 1. Per-attempt debugging infrastructure (migration 021 — APPLIED)
+- **Pod TASK 1 DONE + verified**: `image_generations` now gets one row PER Step-2 QC
+  attempt (correct `attempt_number`, fresh seeds) — pod worker.py fix by pod-Claude.
+- **`qc-failed` bucket (private, RLS read policy)**: every QC-FAILED composite is archived
+  by `run_pipeline._archive_qc_fail` BEFORE the pod overwrites the deterministic
+  `.../step2.jpg`. `qc_checks` gained `step2_prompt` (the exact Qwen prompt of that
+  attempt) + `image_evaluated_path` (the archived image). TEMP tuning aid — strip at
+  deployment (migration header has instructions).
+- **Web**: Image-debug shows per-attempt prompts (`attempt N (FINAL — made the stored
+  image)`) + a "QC attempts" section with the rejected-image previews, issues, and
+  per-attempt prompts. Lightbox bottom line shows `QC: <status> (N attempts)`
+  (`outputs.attempts` was already written; `usePublishing` now selects it).
+
+### 2. QC audit (16 attempts) → strictness REBALANCE (`7e73ed8` + `71903ee`)
+- Audit verdicts vs owner's eye: the judge **hallucinated a 3rd hand** in
+  `held_with_phone` MIRROR scenes (counted from intent left/right logic, census even said
+  "connects to NO VISIBLE ARM") and **hallucinated text garble** on clean wordmarks (the
+  tiny pen-inset label is ALWAYS garbled at render size and gets attributed to the
+  headline; self-contradictory issues like "'TIRZEPATIDE' rendered as 'TIRZEPATIDE'" are
+  the tell). The proportions gate worked perfectly (matched the owner both times).
+- **Rebalance (rules/qc.md + qc.py)**: TUNING-PHASE text rule — brand/product wordmarks
+  at ~85-90% fidelity (recognizable English letters; "ALUVI"/"TIRZEPATDE" pass), judge
+  must TRANSCRIBE the wrong letters as evidence or it passes; pen inset/seal/badge only
+  need similar shapes; explicit `<!-- AFTER FINE-TUNING -->` re-hardening notes in the
+  file. Mirror-scene reflections get NO census number (qc.py census arithmetic also
+  filters reflection entries); count pixels never pose-logic; left-vs-right hand swap
+  never matters; grip-sense check (palm/finger contact must make mechanical sense;
+  torso-brace with one hand = valid); surface scenes also check furniture coherence.
+  ZERO tolerance unchanged for real leftover hands/limbs/floating products.
+- **Scored hand gate (owner-flagged: clustered/clubbed fingers passed QC)**: QC now
+  attaches two deterministic ~3x ZOOM TILES of the torso band to every judge call
+  (full-frame hands are ~80px — fusion is invisible; a model-located bbox HALLUCINATED
+  and was discarded). New `hand_render_quality` 1-10 scored on the tiles;
+  `< QC_HAND_QUALITY_MIN` (env, default 7) fails. The binary "malformed?" question gets
+  rationalized on borderline clusters; the scale does not (patio image honestly scored
+  6/10 → FAIL; clean yoga hands PASS; real 3-hand gym composite still FAILS).
+- VERIFIED regressions on archived images each step. Expect a higher QC fail rate until
+  P4 (source-side hand refinement, see video.md) ships.
+
+### 3. Realism stage web-tunable (migration 022 — APPLIED; TASK 2 deployed, verify pending)
+- Chain: `tenant_pipeline_config.realism_denoise / realism_lora_strength` (nullable;
+  null = pod defaults 0.30/0.7) → Run-settings fields under the Stage-3 toggle →
+  `run_pipeline` `REALISM_PARAMS` → step3 payload `realism_params` (omitted when unset —
+  payload-equality tested) → pod worker forwards → realism service sets
+  `step_3_realism.DENOISE/LORA_STRENGTH` UNCONDITIONALLY per request (clamped
+  [0.05,0.95]/[0,2]; startup defaults captured once; `[realism] denoise=… (per-request|
+  defaults)` log line). Pod files deployed (worker.py + realism app.py).
+- **⏳ NOT yet verified live**: the pod gateway-worker PROCESS predates the new file
+  (started 11:35, file written 16:41 — `file replaced ≠ process running`!). RESTART the
+  pod worker, then Run (knobs already saved: 0.45/0.75) → expect
+  `[pipeline] realism knobs: {...}` on the PC worker terminal +
+  `[realism] denoise=0.45 lora=0.75 (per-request)` on the pod → then mark claudeAI.md
+  TASK 2 DONE.
+- **Run-vs-Save RACE (bit us twice)**: the pipeline reads Run-settings ONCE at launch;
+  a Save committing 1-2 s after the Run click is silently missed. Rule: **Save → then
+  Run.** Proper fix queued as P6 in video.md (config snapshot into the job payload).
+
+### 4. VIDEO overhaul V1–V3 executed (full roadmap + research facts in `video.md`)
+- **V1 (`2e7aa2e`)**: `BASE_NEGATIVE` in `video_pipeline/step_5_video_wan.py` — REMOVED
+  the Wan template's anti-stillness terms (静态/静止/静止不动的画面 were literally
+  demanding motion → products lifted/floating), ADDED anti-float terms. Pod copy
+  curl'd + video-service (:8195) restarted. `rules/script.md` §5: iron rule (the product
+  NEVER moves independently; hand+product one unit), safe wrist-tilt-only showing
+  gesture, NAMED camera grammar (explicit cinematography language, dynamic — not a fixed
+  list), ≤200-word motion prompts (Wan encoder cliff ~320 tokens), calibration example.
+- **V2 (`6476683`)**: POSE GROUND TRUTH — the script brain now receives the step-2 image
+  prompt of the stored composite (`RV.get_pose_prompt`: image_generations highest
+  attempt, fallback qc_checks.step2_prompt) + the scenario's `grip_or_placement`. Wired
+  in BOTH paths (run_video CLI + run_pipeline Phase C). Tightened after a leak on its
+  first real run (`71903ee`): state EVERY hand EXACTLY as the ground truth describes —
+  never simplify a two-handed hold to one (dry-run verified: "right hand cupping the
+  bottom edge, left hand steadying the top corner, exactly as in the photo").
+- **V3 (`6476683`)**: `script.md` §4b SHOT PLAN — the model directs the sequence as ONE
+  performance: each gesture happens AT MOST ONCE per video (in the beat whose dialogue
+  calls for it), most beats are presence-only ("real creators just stand and talk"),
+  energy follows the narrative arc, the camera provides the variety (a different named
+  move per shot). `shot_plan` added to the output JSON (additive). 4-shot dry-run
+  verified; first real web run (patio, 2 shots) confirmed all of it live.
+- **Stall-pill fix (`49e5f5b`)**: `useRunProgress` — video/script stage gets a 3 h stall
+  window (was 30 min → false "Run stalled" during every normal video render);
+  the stall flag self-clears when activity resumes.
+
+### Operational discoveries (save hours tomorrow)
+- **`file replaced ≠ process running`** — every pod .py swap needs its service/worker
+  process restarted; check with `ls -l --time-style=full-iso <file>` vs
+  `ps -o lstart= -p <PID>`.
+- The video-service runs as plain `python app.py` — `ps aux | grep 8195` finds NOTHING;
+  use `pkill -f "python app.py"` (it's the only one) and restart per the startup notes
+  (`nohup … &` — don't forget the `&`; recover a foreground start with Ctrl-Z → `bg &&
+  disown`, NEVER Ctrl-C).
+- **Dry runs write `llm_calls` rows too** — real-renders-only SQL must join
+  `media_generations`/`videos`, not `llm_calls`.
+- "All accounts" production type = 1 video × EVERY account per run; duration rounds UP
+  to shot multiples (17 s → 4 shots ≈ 20 s); intro/outro seconds work in BOTH video
+  modes (audio silence padding).
+- Temp/untracked helpers to delete when the tuning round closes: `orchestrator/_qc_*.py`,
+  `_show_script.py`, `_run_debug.py`, `_dump_prompts.py`, `_realism_paramtest.py`,
+  `_rerun_gym_test.py`, `orchestrator/_qc_audit/` (audit images), `pending.md` (stale).
+
+### Where to resume (priority order)
+1. **video.md P1** — open verifications: restart the pod gateway worker → knob run
+   (closes TASK 2) → watch the rendered videos (V1–V3 as pixels) → one 20 s/4-shot run →
+   watch `hand_render_quality` live and tune `QC_HAND_QUALITY_MIN` if needed.
+2. **video.md P2–P8** — RIFE 16→32 fps (pod TASK 3, biggest win/cost), quality-mode
+   sampling toggle, source-side hand refinement (P4 — brings the QC fail rate back
+   down), video QC gate, config-snapshot race fix, InfiniteTalk PoC; parked: chaining /
+   FLF2V / LoRA fine-tune.
+3. Image-side leftover: the `held_with_phone` Step-2 ROOT fix (Qwen still renders 3rd
+   hands; QC is now fair about mirrors but generation still produces real ones).
+4. Housekeeping: temp files above; real angled product photo; GPU-host-from-DB (v3).
+
+---
+
+## v4 — image-quality + QC overhaul (2026-06-10 session)
 
 > This session fixed both pending.md problems, added the second-product-angle (Picture 3)
 > feature end-to-end, and rebuilt QC into a zero-tolerance, intent-aware gate with a
