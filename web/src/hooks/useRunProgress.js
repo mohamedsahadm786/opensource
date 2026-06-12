@@ -36,6 +36,12 @@ export function useRunProgress(runStartedAt, jobId = null) {
             return;
         }
 
+        // a NEW run is starting — clear the previous run's terminal flags, or the
+        // green "Pipeline complete" pill from the last run sticks through the
+        // whole re-run (completed was only ever reset when the pill was dismissed)
+        setCompleted(false);
+        setStalled(false);
+
         let cancelled = false;
         let lastSig = '';
         let lastChange = runStartedAt;
