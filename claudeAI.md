@@ -374,3 +374,20 @@ VERIFY (adds to TASK 3's four checks)
 7. The media_generations assembly row's params contains wan_params/interp_fps.
 
 ------------------------------------------------------------------------------------
+
+### TASK 3b ADDENDUM (repo-side re-review of the cumulative files, 2026-06-12)
+Verdict on the folded-in files: correct on all angles checked (knobless byte-identical
+both modes, both branches thread the knobs, RIFE per-clip in multishot vs once-post-
+lipsync in silentfirst, audio handling, punch/concat re-encode uniformity, gateway
+model, audit rows; repo extend_tail confirmed fps-agnostic so RIFE-before-tail is safe).
+ONE remaining bug to fix before deploy — copy-paste to the pod Claude:
+
+------------------------------------------------------------------------------------
+Final repo-side review note: videos.fps is an INTEGER column (001 schema), but your
+_fps() returns a 2-decimal float (31.98 is possible from container metadata, and even
+clean values arrive as 16.0/32.0) and worker.py writes it straight into the upsert —
+a non-integer float can fail the insert cast and error the whole video job AFTER the
+render. Change the worker's videos upsert line to:
+  "fps": int(round(float(data.get("fps") or 16))),
+Everything else in the cumulative files is verified correct — ship after this one change.
+------------------------------------------------------------------------------------
