@@ -358,6 +358,24 @@ def do_video(account, persona, output_row, scenario_spec, api_key, sources, cont
     print(f"   video     ✓ ({controls['video_mode']}, {res['stats']['num_shots']} shots)" + (f" ({d:.0f}s)" if d else ""))
 
 
+def get_run_config(tenant_id: str, job_id: str | None) -> tuple[dict, str]:
+    """P6 (video.md): prefer the config snapshot FROZEN into the triggering job's
+    payload at the moment the web Run button was clicked — makes the Save-vs-Run
+    race structurally impossible. Falls back to a live tenant_pipeline_config read
+    for CLI runs, legacy jobs, and any snapshot-read failure (never worse than
+    today). Empty-string values are dropped defensively (web form artifacts must
+    never reach float()/int())."""
+    if job_id:
+        try:
+            rows = sb().table("jobs").select("request_payload").eq("id", job_id).limit(1).execute().data
+            snap = ((rows[0].get("request_payload") or {}).get("config_snapshot")) if rows else None
+            if isinstance(snap, dict) and snap:
+                return {k: v for k, v in snap.items() if v != ""}, "snapshot (frozen at Run click)"
+        except Exception as e:
+            print(f"[pipeline] (warn) config snapshot read failed -> live DB read: {e}")
+    return RV.get_pipeline_config(tenant_id), "live DB read"
+
+
 # ── account resolution ──────────────────────────────────────────────────────────
 def get_tenant(ident: str) -> dict:
     t = sb().table("tenants").select("id,slug")
@@ -424,20 +442,24 @@ def main() -> None:
     ap.add_argument("--shot-seconds", type=int, default=None)
     ap.add_argument("--num-shots", type=int, default=None)
     ap.add_argument("--no-free", action="store_true")
+    ap.add_argument("--job-id", default=None,
+                    help="pipeline_run job id (run_worker passes it; enables the P6 config snapshot)")
     args = ap.parse_args()
 
     # accounts + tenant + config
     if args.tenant:
         tenant = get_tenant(args.tenant)
         tenant_id = tenant["id"]
-        cfg = RV.get_pipeline_config(tenant_id)
+        cfg, cfg_source = get_run_config(tenant_id, args.job_id)
         accounts = select_accounts_by_mode(tenant_id, cfg)
         if not accounts:
             raise SystemExit(f"[pipeline] creation_mode={cfg.get('creation_mode')} selected no accounts")
     else:
         accounts = resolve_accounts(args)
         tenant_id = accounts[0]["tenant_id"]
-        cfg = RV.get_pipeline_config(tenant_id)
+        cfg, cfg_source = get_run_config(tenant_id, args.job_id)
+    # visible in the run_worker terminal — proves WHERE this run's config came from
+    print(f"[pipeline] config source: {cfg_source}")
 
     global _TENANT_ID, STEP3_ENABLED, QC_ENABLED
     _TENANT_ID = tenant_id

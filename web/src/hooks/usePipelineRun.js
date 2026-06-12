@@ -20,12 +20,15 @@ export function usePipelineRun() {
         try { return sessionStorage.getItem(JOB_KEY) || null; } catch { return null; }
     });
 
-    const run = useCallback(async () => {
+    // configSnapshot (P6): the committed tenant_pipeline_config row returned by the
+    // Save upsert — frozen into the job payload so the run can never race a Save.
+    const run = useCallback(async (configSnapshot = null) => {
         if (running) return { ok: false, alreadyRunning: true };
         setRunning(true);
         try {
             const { data, error } = await supabase.functions.invoke('trigger-pipeline', {
-                method: 'POST', body: {},
+                method: 'POST',
+                body: configSnapshot ? { config_snapshot: configSnapshot } : {},
             });
             if (error) {
                 console.error('[Alluvi] trigger function unreachable', error);

@@ -111,13 +111,16 @@ export function Dashboard({ theme, onToggleTheme, onLogout, user, impersonated =
             toast.info('Complete the run settings first.');
             return;
         }
+        let savedRow;
         try {
-            await saveRunConfig(runConfig);
+            // the upsert RETURNS the committed row — that exact row becomes the
+            // run's config snapshot (P6: what you see is what runs)
+            savedRow = await saveRunConfig(runConfig);
         } catch (err) {
             toast.error('Could not save run settings.');
             return;
         }
-        const result = await run();
+        const result = await run(savedRow);
         if (result.alreadyRunning) return;
         if (result.ok) {
             toast.success('Pipeline run enqueued. Progress will appear next to the Run button.');

@@ -94,7 +94,7 @@ def run_job(job: dict) -> None:
         # stdout; encoding+errors make the parent decode the pipe safely too.
         child_env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
         proc = subprocess.run(
-            [sys.executable, str(HERE / "run_pipeline.py"), "--tenant", slug],
+            [sys.executable, str(HERE / "run_pipeline.py"), "--tenant", slug, "--job-id", str(job_id)],
             cwd=str(HERE), capture_output=True, text=True,
             encoding="utf-8", errors="replace", env=child_env, timeout=RUN_TIMEOUT_S)
         if proc.returncode == 0:

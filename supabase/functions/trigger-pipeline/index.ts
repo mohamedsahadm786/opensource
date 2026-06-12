@@ -36,13 +36,37 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (!member?.tenant_id) return json({ ok: false, error: 'no_tenant' }, 400);
 
+    // P6 (video.md): freeze the run's config INTO the job payload so run_pipeline
+    // never has to re-read tenant_pipeline_config (kills the Save-vs-Run race).
+    // Prefer the client-sent snapshot (= the committed row the upsert returned to
+    // the browser); fall back to a server-side read for older web bundles. A
+    // missing snapshot is never fatal — run_pipeline falls back to a live read.
+    let snapshot: Record<string, unknown> | null = null;
+    try {
+      const body = await req.json().catch(() => null);
+      const cs = body?.config_snapshot;
+      if (cs && typeof cs === 'object' && !Array.isArray(cs)) snapshot = cs;
+    } catch { /* no body — fine */ }
+    if (!snapshot) {
+      const { data: cfgRow } = await admin
+        .from('tenant_pipeline_config')
+        .select('*')
+        .eq('tenant_id', member.tenant_id)
+        .maybeSingle();
+      if (cfgRow) snapshot = cfgRow;
+    }
+
     const { data: job, error: jErr } = await admin
       .from('jobs')
       .insert({
         tenant_id: member.tenant_id,
         job_type: 'pipeline_run',
         status: 'queued',
-        request_payload: { source: 'web', triggered_by: userData.user.id },
+        request_payload: {
+          source: 'web',
+          triggered_by: userData.user.id,
+          ...(snapshot ? { config_snapshot: snapshot } : {}),
+        },
         idempotency_key: `pipeline_run:${member.tenant_id}:${crypto.randomUUID()}`,
       })
       .select('id')
