@@ -50,25 +50,29 @@ the same still; gestures are distributed once-per-video by the shot plan.
       `hand_render_quality` per attempt; tune `QC_HAND_QUALITY_MIN` (default 7)
       if it over/under-fires across a few runs.
 
-### P2. RIFE interpolation 16→32 fps (pod TASK 3 — biggest perceptual win per GPU-second)
-A post-processing pass in the video-service after Wan renders each clip (or after
-assembly). Near-free vs diffusion cost; removes the single biggest "AI look"
-factor (16 fps choppiness). Write the claudeAI.md TASK 3 prompt for the pod
-Claude; verify by fps of the stored mp4 + side-by-side feel.
+### P2+P3. Web-tunable video quality: RIFE 16→32 fps + Wan sampling knobs
+**(repo side BUILT 2026-06-12 — pending: migration 023 apply + pod TASK 3 + live A/B)**
 
-### P3. Wan full-potential "quality mode" (per-tenant toggle; ships with/after P2)
-Same safe chain as the realism knobs (column → payload → worker → service):
+Built as ONE chain (migration 023 → Run-settings "Video quality (advanced)" →
+`run_video.resolve_controls` → payload `wan_params` {steps, cfg_high, cfg_low} +
+`interp_fps` (keys OMITTED when unset) → gateway `VideoJobRequest` → worker →
+video-service → `step_5_video_wan._apply_sampling` (literal writes onto the two
+KSamplerAdvanced expert nodes) + `multishot/stitch interp_fps` → NEW
+`video_pipeline/interpolate_rife.py` (Practical-RIFE subprocess, PER CLIP before
+concat — never across a cut). Verified by `orchestrator/_video_paramtest.py`
+(7 cases incl. byte-identical no-op on the real wan_api.json) + web build.
 
-| Knob | Today | Quality-mode target | Note |
-|---|---|---|---|
-| Steps | 20 | 25–30 | sharper, more coherent frames |
-| CFG high-noise expert | 3.5 | ~4.5–5.5 | stronger prompt adherence |
-| CFG low-noise expert | 1.0 | ~3–4 | 1.0 barely listens in the detail phase |
-| FPS | 16 (+RIFE→32 from P2) | native 24 (121 frames) only if RIFE isn't enough | +50% diffusion cost |
-| Resolution | 768x1344 | keep | already ≈720P budget |
-| lightx2v 4-step LoRA | disabled | keep disabled | throughput lever, not quality |
+**CORRECTION to the old table (read from the real graph):** both experts share
+ONE CFG = 3.5 via a switch node; the "low expert 1.0" previously quoted here is
+actually the disabled lightx2v fast-mode CFG. Defaults: steps 20, split 10,
+CFG 3.5/3.5, 16 fps. Knob clamps: steps [4,40], cfg [1.0,8.0]; split always 50%.
 
-Costs ~2–3x render time → toggle, never default. A/B on the pod before adopting.
+Remaining: apply migration 023; pod TASK 3 (gateway+worker+service pass-through,
+Practical-RIFE install, deploy repo files, restarts); A/B: one run RIFE-only
+(32 fps, same sampling), then one run steps=28/cfg_high=4.5; verify by
+`[pipeline] video knobs:` line, `[rife]`/`sampling overrides` pod logs, ffprobe
+fps of the stored mp4, and side-by-side eyeball. Costs ~2–3x render time when
+sampling knobs are raised → per-tenant, never default.
 
 ### P4. Source-side hand refinement (raises the floor the new QC gate measures)
 The realism pass (denoise 0.30) refines texture but cannot reconstruct fingers —

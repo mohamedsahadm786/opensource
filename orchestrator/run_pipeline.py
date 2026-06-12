@@ -459,6 +459,9 @@ def main() -> None:
 
     n_scen = args.scenarios if args.scenarios is not None else int((cfg or {}).get("num_videos_per_account") or 1)
     controls = RV.resolve_controls(cfg, _CtlArgs(args))
+    # visible in the run_worker terminal — proves which video-knob snapshot this run took
+    _vk = {k: controls[k] for k in ("wan_params", "interp_fps") if k in controls}
+    print(f"[pipeline] video knobs: {_vk or 'none (workflow defaults)'}")
 
     # learning phase: exploration walks the curated set; active SELECTS via Thompson sampling
     state = ENG.engine_state(sb(), tenant_id)

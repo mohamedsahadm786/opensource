@@ -22,11 +22,22 @@ def _punch(clips, out_dir, factor, w, h):
 
 
 def stitch(clip_paths, out_path, *, punch_in: float = 1.0,
-           punch_w: int = 768, punch_h: int = 1344, **_ignored):
+           punch_w: int = 768, punch_h: int = 1344, interp_fps: int | None = None,
+           **_ignored):
     clips = [str(Path(p).resolve()) for p in clip_paths]
     if not clips:
         raise ValueError("no clips to stitch")
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
+    if interp_fps and int(interp_fps) > 0:
+        # RIFE PER CLIP, before any concat — interpolating across a cut would
+        # blend unrelated frames into ghosts (claudeAI.md TASK 3 / video.md P2)
+        from video_pipeline import interpolate_rife
+        print(f"[stitch] RIFE interpolation -> {int(interp_fps)} fps per clip")
+        rdir = out_path.parent / "_rife"; rdir.mkdir(parents=True, exist_ok=True)
+        clips = [interpolate_rife.interpolate(
+                     c, rdir / f"r{i+1}.mp4", target_fps=int(interp_fps),
+                     scene_id=f"stitch/c{i+1}")["local_path"]
+                 for i, c in enumerate(clips)]
     if punch_in and punch_in > 1.0 and len(clips) > 1:
         print(f"[stitch] alternating punch-in x{punch_in} on shots 2,4,6,...")
         clips = _punch(clips, out_path.parent / "_punch", punch_in, punch_w, punch_h)

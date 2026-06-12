@@ -23,6 +23,10 @@ const EMPTY = {
     qc_enabled: true,
     realism_denoise: '',           // optional — empty = pod default (0.30)
     realism_lora_strength: '',     // optional — empty = pod default (0.7)
+    wan_steps: '',                 // optional — empty = workflow default (20)
+    wan_cfg_high: '',              // optional — empty = workflow default (3.5)
+    wan_cfg_low: '',               // optional — empty = workflow default (3.5)
+    interp_target_fps: '',         // optional — empty = off (native 16 fps)
 };
 
 export function isPipelineConfigComplete(c) {
@@ -82,6 +86,10 @@ export function usePipelineConfig(tenantId) {
             qc_enabled: Boolean(draft.qc_enabled),
             realism_denoise: numOrNull(draft.realism_denoise),
             realism_lora_strength: numOrNull(draft.realism_lora_strength),
+            wan_steps: numOrNull(draft.wan_steps),
+            wan_cfg_high: numOrNull(draft.wan_cfg_high),
+            wan_cfg_low: numOrNull(draft.wan_cfg_low),
+            interp_target_fps: numOrNull(draft.interp_target_fps),
             updated_at: new Date().toISOString(),
         };
         const { data, error: err } = await supabase

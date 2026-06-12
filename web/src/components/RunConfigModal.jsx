@@ -14,6 +14,7 @@ export function RunConfigModal({ open, config, accounts = [], tenantId, onClose,
     const [error, setError] = useState(null);
     const [saving, setSaving] = useState(false);
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [showQuality, setShowQuality] = useState(false);
 
     useEffect(() => {
         if (!open) return;
@@ -179,6 +180,55 @@ export function RunConfigModal({ open, config, accounts = [], tenantId, onClose,
                                 <span>QC validation + retry</span>
                             </label>
                         </div>
+
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowQuality((s) => !s)}>
+                            <Sliders /><span>{showQuality ? 'Hide' : 'Show'} video quality (advanced)</span>
+                        </button>
+                        {showQuality && (
+                            <>
+                                <div className="field-row">
+                                    <label className="field">
+                                        <span className="field-label">Wan sampling steps <span className="field-opt">(default 20)</span></span>
+                                        <div className="field-input">
+                                            <input type="number" min="10" max="40" step="1" placeholder="20"
+                                                value={form.wan_steps ?? ''}
+                                                onChange={(e) => set('wan_steps', e.target.value)} />
+                                        </div>
+                                    </label>
+                                    <label className="field">
+                                        <span className="field-label">Frame interpolation <span className="field-opt">(RIFE)</span></span>
+                                        <div className="field-input is-select">
+                                            <select value={form.interp_target_fps ?? ''}
+                                                onChange={(e) => set('interp_target_fps', e.target.value)}>
+                                                <option value="">Off — native 16 fps</option>
+                                                <option value="32">32 fps (smoother, near-free)</option>
+                                            </select>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div className="field-row">
+                                    <label className="field">
+                                        <span className="field-label">CFG — motion expert <span className="field-opt">(default 3.5)</span></span>
+                                        <div className="field-input">
+                                            <input type="number" min="1" max="8" step="0.1" placeholder="3.5"
+                                                value={form.wan_cfg_high ?? ''}
+                                                onChange={(e) => set('wan_cfg_high', e.target.value)} />
+                                        </div>
+                                    </label>
+                                    <label className="field">
+                                        <span className="field-label">CFG — detail expert <span className="field-opt">(default 3.5)</span></span>
+                                        <div className="field-input">
+                                            <input type="number" min="1" max="8" step="0.1" placeholder="3.5"
+                                                value={form.wan_cfg_low ?? ''}
+                                                onChange={(e) => set('wan_cfg_low', e.target.value)} />
+                                        </div>
+                                    </label>
+                                </div>
+                                <p className="field-opt" style={{ margin: '-4px 0 0 2px' }}>
+                                    Empty = today's defaults. Higher steps/CFG can cost 2–3× render time; change one knob per run.
+                                </p>
+                            </>
+                        )}
 
                         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowAdvanced((s) => !s)}>
                             <Sliders /><span>{showAdvanced ? 'Hide' : 'Show'} advanced (silent-first knobs)</span>

@@ -161,7 +161,7 @@ def resolve_controls(cfg: dict, args: argparse.Namespace) -> dict:
     shot_seconds = args.shot_seconds or int(c["shot_seconds"])
     duration = args.duration or int(c["video_duration_seconds"])
     num_shots = args.num_shots or max(1, math.ceil(duration / max(1, shot_seconds)))
-    return {
+    controls = {
         "video_mode": mode, "shot_seconds": shot_seconds, "num_shots": num_shots,
         "video_duration_seconds": duration,
         "intro_seconds": float(c["intro_seconds"]), "outro_seconds": float(c["outro_seconds"]),
@@ -169,6 +169,21 @@ def resolve_controls(cfg: dict, args: argparse.Namespace) -> dict:
         "inference_steps": int(c["inference_steps"]), "punch_in": float(c["punch_in"]),
         "threshold": int(c["threshold"]), "seed": c.get("seed"),
     }
+    # optional Wan quality knobs (migration 023; null = workflow defaults) — the
+    # keys are OMITTED ENTIRELY when unset so untouched tenants get byte-identical
+    # payloads (same doctrine as realism_params, claudeAI.md TASK 3)
+    wan_params = {}
+    if c.get("wan_steps") is not None:
+        wan_params["steps"] = int(c["wan_steps"])
+    if c.get("wan_cfg_high") is not None:
+        wan_params["cfg_high"] = float(c["wan_cfg_high"])
+    if c.get("wan_cfg_low") is not None:
+        wan_params["cfg_low"] = float(c["wan_cfg_low"])
+    if wan_params:
+        controls["wan_params"] = wan_params
+    if c.get("interp_target_fps") is not None:
+        controls["interp_fps"] = int(c["interp_target_fps"])
+    return controls
 
 
 def build_enqueue_payload(*, account: dict, persona: dict, output: dict, controls: dict,

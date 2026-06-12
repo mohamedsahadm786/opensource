@@ -120,6 +120,48 @@ def _find_seed_sampler(graph: dict):
     return None
 
 
+def _find_low_sampler(graph: dict):
+    """The LOW-NOISE expert: the KSamplerAdvanced that does NOT add noise
+    (it continues from the high-noise expert's leftover noise)."""
+    for nid, node in graph.items():
+        if node.get("class_type") == "KSamplerAdvanced" \
+           and node.get("inputs", {}).get("add_noise") == "disable":
+            return nid
+    return None
+
+
+def _apply_sampling(graph: dict, *, sampling_steps: int | None = None,
+                    cfg_high: float | None = None, cfg_low: float | None = None) -> dict:
+    """Per-tenant quality knobs (web Run-settings -> tenant_pipeline_config ->
+    payload wan_params, claudeAI.md TASK 3). Writes LITERAL values onto the two
+    KSamplerAdvanced expert nodes, bypassing the workflow's switch chain exactly
+    like `length` bypasses the math chain. All None = graph untouched =
+    byte-identical default behavior (steps 20, split 10, shared CFG 3.5).
+    Returns the effective overrides for the audit record."""
+    if sampling_steps is None and cfg_high is None and cfg_low is None:
+        return {}
+    n_high = _find_seed_sampler(graph)
+    n_low = _find_low_sampler(graph)
+    if n_high is None or n_low is None:
+        raise RuntimeError("could not locate both KSamplerAdvanced expert nodes in wan_api.json")
+    applied: dict = {}
+    if sampling_steps is not None:
+        steps = int(max(4, min(40, int(sampling_steps))))
+        split = max(1, round(steps / 2))   # keep the experts' 50/50 split (today: 10/20)
+        graph[n_high]["inputs"]["steps"] = steps
+        graph[n_high]["inputs"]["start_at_step"] = 0
+        graph[n_high]["inputs"]["end_at_step"] = split
+        graph[n_low]["inputs"]["steps"] = steps
+        graph[n_low]["inputs"]["start_at_step"] = split
+        graph[n_low]["inputs"]["end_at_step"] = steps
+        applied["steps"], applied["split_step"] = steps, split
+    if cfg_high is not None:
+        applied["cfg_high"] = graph[n_high]["inputs"]["cfg"] = max(1.0, min(8.0, float(cfg_high)))
+    if cfg_low is not None:
+        applied["cfg_low"] = graph[n_low]["inputs"]["cfg"] = max(1.0, min(8.0, float(cfg_low)))
+    return applied
+
+
 def _stage_input_image(image_path: Path) -> str:
     src = Path(image_path)
     if not src.exists():
@@ -177,7 +219,10 @@ def generate(handle: dict, image_path, out_path, *,
              width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT,
              fps: int = DEFAULT_FPS, seed: int | None = None,
              filename_prefix: str = "video/alluvi_wan",
-             scene_id: str = "?") -> dict:
+             scene_id: str = "?",
+             sampling_steps: int | None = None,
+             cfg_high: float | None = None,
+             cfg_low: float | None = None) -> dict:
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -211,12 +256,17 @@ def generate(handle: dict, image_path, out_path, *,
     graph[n_seed]["inputs"]["noise_seed"] = int(seed)
     if n_save and "filename_prefix" in graph[n_save].get("inputs", {}):
         graph[n_save]["inputs"]["filename_prefix"] = filename_prefix
+    sampling = _apply_sampling(graph, sampling_steps=sampling_steps,
+                               cfg_high=cfg_high, cfg_low=cfg_low)
+    if sampling:
+        print(f"[step_5_wan] [{scene_id}] sampling overrides: {sampling}")
 
     audit = {"endpoint": ENDPOINT_LABEL, "server": SERVER_ADDR,
              "workflow_template": WORKFLOW_TEMPLATE,
              "arguments": {"image": image_name, "motion_prompt": motion_prompt,
                            "negative_prompt": neg, "num_frames": num_frames,
-                           "width": width, "height": height, "fps": fps, "seed": seed}}
+                           "width": width, "height": height, "fps": fps, "seed": seed,
+                           **({"sampling_overrides": sampling} if sampling else {})}}
     (out_path.parent / f"{out_path.stem}_request.json").write_text(
         json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -251,7 +301,8 @@ def generate(handle: dict, image_path, out_path, *,
         "negative_prompt": neg,
         "cost_usd": COST_PER_CALL_USD,
         "params": {"width": width, "height": height, "fps": fps,
-                   "num_frames": num_frames, "seed": seed},
+                   "num_frames": num_frames, "seed": seed,
+                   **({"sampling_overrides": sampling} if sampling else {})},
     }
 
 
