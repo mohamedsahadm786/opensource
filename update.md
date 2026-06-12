@@ -9,7 +9,112 @@
 
 ---
 
-## v5 — QC debug tooling + QC rebalance + realism knobs + VIDEO overhaul (2026-06-11 session — READ THIS FIRST)
+## v6 — knob-chain completion: realism verified, video quality knobs (P2+P3), config snapshot (P6), InfiniteTalk PoC launched (2026-06-12 session — READ THIS FIRST)
+
+> This session closed TASK 2 (realism knobs) after finding+fixing the gateway bug that
+> blocked it, built the FULL web-tunable video-quality chain (Wan sampling knobs + RIFE
+> 16→32 fps, both video modes), built P6 (config snapshot — kills the Save→Run race),
+> and launched the P7 InfiniteTalk PoC on the pod. Commits `b33b3fe` → `d14edb9` (+
+> this handoff), all pushed. Where this disagrees with v5 below, this wins.
+> **`pending.md` is REVIVED and CURRENT again — it is the to-do list; read it after this.**
+
+### 1. TASK 2 (realism knobs) — root-caused, fixed, VERIFIED live
+- The knobs never arrived because the GATEWAY's pydantic model dropped them:
+  `Step3JobRequest` had no `realism_params` field and the handler stores
+  `req.model_dump()` — **pydantic v2 silently discards unknown keys**. Diagnosed via
+  DB evidence (config row correct + payload missing the key), confirmed by the pod
+  Claude from its source copies, fixed as TASK 2b (one field + gateway restart).
+- VERIFIED: `jobs.request_payload.realism_params = {denoise:0.45, lora_strength:0.75}`
+  and pod log `[realism] denoise=0.45 lora=0.75 (per-request)`. TASK 2 + 2b DONE.
+- **THE LESSON (now doctrine, baked into TASK 3):** every new payload key must be
+  added at ALL THREE whitelist hops — gateway request model, worker forward body,
+  service request model — or it dies silently at the first one.
+
+### 2. P2+P3 — web-tunable video quality, shipped END-TO-END (repo + pod deployed)
+- **Migration 023 (APPLIED)**: `tenant_pipeline_config.wan_steps / wan_cfg_high /
+  wan_cfg_low / interp_target_fps` (nullable; NULL = byte-identical today-behavior).
+- **Web**: Run-settings → "Show video quality (advanced)": Wan steps (placeholder 20),
+  CFG motion expert / CFG detail expert (3.5), Frame interpolation dropdown (Off/32).
+- **Chain**: `run_video.resolve_controls` → payload `wan_params{steps,cfg_high,cfg_low}`
+  + `interp_fps` (keys OMITTED when unset) → gateway `VideoJobRequest` fields → worker
+  conditional forward → video-service → `step_5_video_wan._apply_sampling` writes
+  LITERAL values onto the two KSamplerAdvanced expert nodes (50% split recomputed;
+  clamps steps [4,40], cfg [1.0,8.0]) + `multishot/stitch interp_fps`.
+- **GROUND-TRUTH CORRECTION** (read from wan_api.json): both experts share ONE CFG=3.5
+  via a switch node; the old "low expert 1.0" claim was the disabled lightx2v
+  fast-mode CFG. Defaults: steps 20, split 10, CFG 3.5/3.5, 16 fps.
+- **NEW `video_pipeline/interpolate_rife.py`**: Practical-RIFE subprocess per clip
+  (temp-dir isolation, audio-mux insurance; env RIFE_DIR / RIFE_PYTHON).
+  **RIFE placement doctrine**: multishot = per clip in stitch BEFORE concat (never
+  across a cut → ghost frames); silentfirst = ONCE on the final lip-synced take,
+  AFTER lipsync (else 2x LatentSync cost), BEFORE extend_tail (uniform fps).
+- **Pod (TASK 3 + 3b, deployed + restarted)**: gateway/worker/video-service updated
+  by the pod Claude, repo-reviewed (2 real bugs caught: `videos.fps` hardcoded 16 —
+  now measured via ffprobe and **int-rounded** (videos.fps is an INTEGER column);
+  assembly `media_generations.params` now records wan_params/interp_fps). Practical-
+  RIFE installed at `/workspace/Practical-RIFE` with **v4.25 weights** — use the
+  README "Trained Model" Google-Drive links, NOT the "Model training" links (those
+  are code-only, no .pkl; cost us one wrong 88KB download). Smoke test passed
+  (24.98→49.96 fps, audio merged).
+- Verified by `orchestrator/_video_paramtest.py` (7 cases incl. byte-identical no-op
+  on the real graph) + web build. **Verification runs still pending — see pending.md #1/#3.**
+
+### 3. P6 — config snapshot at Run click (Save→Run race KILLED) — built, restart pending
+- `Dashboard.handleRun` already awaited `saveRunConfig`; its upsert RESPONSE (= the
+  committed row) is now passed to `run(savedRow)` → `trigger-pipeline` stores it as
+  `request_payload.config_snapshot` (server-side row fetch = fallback for old
+  bundles; function REDEPLOYED) → `run_worker` passes `--job-id` → `run_pipeline.
+  get_run_config` prefers the snapshot; fail-open to live DB read (CLI/legacy/error
+  = today's behavior). `''` values dropped defensively. Proof line in the worker
+  terminal: `[pipeline] config source: snapshot (frozen at Run click)`.
+- Save button/DB row UNCHANGED (row stays the persistent store; snapshot = frozen
+  copy per run = free audit trail). Verified by `_p6_paramtest.py` (4 cases).
+- **⏳ NOT live yet**: the PC `run_worker.py` PROCESS predates the commit (file
+  replaced ≠ process running!) — restart it after the in-flight run, hard-refresh
+  the browser, then one run must show the snapshot line (pending.md #2).
+
+### 4. P7 — InfiniteTalk PoC launched (claudeAI.md TASK 4)
+- Full isolated-experiment prompt written + handed to the pod Claude (reply not yet
+  reviewed). Isolation contract: everything under `/workspace/infinitetalk-poc/`
+  incl. a DEDICATED venv; no shared-venv installs; no existing-file modifications;
+  no daemons; disk/VRAM gates; "blocked because X" = a valid outcome.
+- Owner inputs via Jupyter: `input/anchor.jpg` (a step3 image) + `dialogue.txt`
+  (audio synthesized with the pipeline's own F5 voice for a fair comparison).
+
+### Operational discoveries (2026-06-12 — will save hours)
+- **Supabase secret key from PowerShell**: `Invoke-RestMethod` is rejected
+  ("Forbidden use of secret API key in browser" — browser-like UA); use `curl.exe`
+  with BOTH `Authorization: Bearer` and `apikey:` headers.
+- **The gateway pydantic whitelist** is where payload keys silently die (TASK 2's
+  root cause; pre-empted at all three hops in TASK 3).
+- **RIFE/stitch logs print only at the END of video assembly** — a silent
+  service.log mid-render is normal, not a wiring break (cost us one false alarm).
+- **Shared-venv poisoning**: Practical-RIFE's `requirements.txt` pin DOWNGRADED
+  numpy 1.26.4→1.23.5 in `/workspace/ai-toolkit/venv` (would break pandas/
+  scikit/albumentations consumers). Fix: `pip install numpy==1.26.4` back, then
+  patch sk-video's dead `np.float`/`np.int` aliases via sed instead. THIS is why
+  TASK 4's isolation contract mandates a dedicated venv.
+- Pod has no `unzip` (use `python -m zipfile -e`) and no `fuser` (kill by port:
+  `kill $(ss -tlnp | grep ':8195' | grep -oP 'pid=\K[0-9]+' | head -1)`).
+- **Jupyter uploads are async** — verify the byte size matches the PC file before
+  extracting (a mid-upload zip gave BadZipFile; same size = upload finished).
+- `pgrep -f "python app.py"` finds ONLY the video-service; find the realism service
+  by port (`ss -tlnp | grep 8194`); its log is `/workspace/realism_service_8194.log`.
+- Today's run took 2 step2 attempts (hand gate burning a retry) — expected until P4.
+- Repo root = the GitHub repo root (`raw.githubusercontent.com/mohamedsahadm786/
+  opensource/main/<path>` works directly for pod curls).
+
+### Where to resume (priority order)
+**→ `pending.md` is the canonical list now (rewritten this session).** Short form:
+1. Audit the in-flight RIFE run (fps=32 in DB, [rife] lines, eyeball smoothness).
+2. Restart PC run_worker + browser hard-refresh → verify P6 snapshot line.
+3. TASK 3/3b closure runs (knobless control / sampling / silentfirst).
+4. Review the pod Claude's TASK 4 (InfiniteTalk) reply; run the PoC when idle.
+5. Then: P1 leftovers (20s run, hand-gate tuning) → P4 hand refinement → P5 video QC.
+
+---
+
+## v5 — QC debug tooling + QC rebalance + realism knobs + VIDEO overhaul (2026-06-11 session)
 
 > This session: built the failed-image archive + per-attempt debugging, audited and
 > REBALANCED QC (it was over-strict in two ways and under-strict in one), made the
