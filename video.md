@@ -88,11 +88,17 @@ Sample N frames per shot → the same Opus vision QC (anatomy + product integrit
 the image gate). Render time per retry is the cost. Design choice to make:
 per-shot gate (cheap retries) vs final-video gate (simpler).
 
-### P6. Config-snapshot at trigger time (kills the Run-vs-Save race)
-Twice today a run launched 1–2 s before the settings save committed and silently
-used stale knobs. Proper fix: `trigger-pipeline` (or the web Run click) snapshots
-the just-saved config INTO the job payload; `run_pipeline` prefers the snapshot
-over a fresh DB read. Makes the race structurally impossible.
+### P6. Config-snapshot at trigger time — BUILT 2026-06-12 (`5b1f5a5`), live verify pending
+The Run click's save-upsert RESPONSE (= the committed row) is frozen into
+`jobs.request_payload.config_snapshot`; `run_worker` passes `--job-id`;
+`run_pipeline.get_run_config` prefers the snapshot (live DB read = fallback for
+CLI/legacy/error — fail-open, never worse than before). Proof line:
+`[pipeline] config source: snapshot (frozen at Run click)` in the worker
+terminal. Verified by `_p6_paramtest.py` (4 cases) + web build; trigger-pipeline
+redeployed. REMAINING: restart `run_worker.py` on the PC (old process doesn't
+pass `--job-id`) after the in-flight run ends, then one web run must show the
+snapshot source line + `config_snapshot` in the job payload. After that the
+"Save → wait → Run" rule is obsolete.
 
 ### P7. InfiniteTalk proof-of-concept (the strategic quality jump)
 Pod experiment, NOT pipeline: install InfiniteTalk, run ONE scenario manually
