@@ -97,6 +97,17 @@ def interpolate(in_path, out_path, *, target_fps: int = 32, scene_id: str = "?")
                 check=True, stdout=_NULL, stderr=_NULL)
             result = muxed
 
+        # Practical-RIFE writes mp4v (OpenCV) — browsers can't decode mp4v in a
+        # <video> tag (black frame, audio only; bit the silentfirst path on
+        # 2026-06-12). ALWAYS normalize to H.264 before returning.
+        norm = work / "norm.mp4"
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(result), "-c:v", "libx264", "-crf", "18",
+             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
+             "-movflags", "+faststart", str(norm)],
+            check=True, stdout=_NULL, stderr=_NULL)
+        result = norm
+
         out_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(result, out_path)
 

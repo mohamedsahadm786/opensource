@@ -10,16 +10,27 @@
 
 ---
 
-## 1. ✅ RIFE run AUDITED (2026-06-12 16:01) — only the eyeball verdict left
-DB + logs all green: `[rife]` line per clip before concat, `videos.fps`=**50**
-(real measured int), assembly params recorded `interp_fps:32 / wan_params:null`.
-- **DISCOVERY**: LatentSync outputs **25 fps** (not 16 — that's only Wan's render
-  rate; lipsync resamples 16→25 with duplicated frames, which is why the choppy
-  cadence survived). RIFE doubles what it receives → final = **50 fps**. The knob
-  effectively means "2x smoothness"; final fps will read 50 in the DB. Cosmetic
-  TODO: rename the web option label "32 fps" → "2x (smooth)".
-- 👁 STILL TO DO: watch the video vs yesterday's — is the stop-motion AI feel gone?
-  Also judge the realism knobs (0.45/0.75) on the image.
+## 1. ✅ RIFE runs AUDITED + owner verdict: ARTIFACTS — knob turned OFF for now
+Wiring 100% green (payload, `[rife]` lines, `videos.fps`=50 measured int, assembly
+params). Discoveries (full detail in update.md v6 + this audit):
+- **LatentSync outputs 25 fps** (Wan renders 16; lipsync resamples with duplicated
+  frames). RIFE doubles what it receives → 50 fps, not 32. Knob = "2x smoothness".
+- **OWNER VERDICT (2026-06-12 evening): RIFE output REJECTED in current form**:
+  1. **Seam-morph artifact**: shots >5s are built from frame_join'd Wan chunks;
+     those internal seams were invisible single-frame cuts at 16/25 fps, but RIFE
+     interpolates ACROSS them → a 1-2 frame morph/warp = "sudden artificial
+     shifting" (worst in silentfirst — every seam in the whole take morphs).
+     The shot-to-shot cuts are NOT the problem (RIFE is per-clip there).
+  2. **mp4v codec bug**: Practical-RIFE writes OpenCV mp4v → browsers show BLACK
+     +audio-only (Supabase/web preview); local players fine. Bit the silentfirst
+     final (multishot escaped via the punch-in libx264 re-encode).
+     **FIXED in repo** (`interpolate_rife.py` now normalizes to H.264) — pod still
+     needs: curl the file + restart video-service BEFORE any future RIFE run.
+- **ACTION TAKEN: Frame interpolation = Off** in Run settings (old behavior back).
+- NEXT (design, when prioritized): **seam-aware RIFE** — frame_join returns seam
+  timestamps; split at seams → interpolate segments → rejoin with clean cuts.
+  ALTERNATIVE: P3's native 24 fps Wan render (+50% cost, zero seam issues) may be
+  the better smoothness lever. Decide after P7's verdict.
 
 ## 2. ⏳ P6 live verification (config snapshot — code all shipped, one restart left)
 The PC's `run_worker.py` process predates the P6 commit and doesn't pass `--job-id`.
