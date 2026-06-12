@@ -478,3 +478,16 @@ VERIFY (owner, from the PC)
   folders show no modifications; all services still healthy on 8191-8195.
 
 ------------------------------------------------------------------------------------
+
+### TASK 4 ADDENDUM (repo-side review of the pod Claude's runbook, 2026-06-12)
+Runbook approved — isolation contract fully respected; weights/commands match the
+official InfiniteTalk usage. TWO corrections before running (both verified against
+OUR repo code):
+1. PHASE 4: synth_tts.py outputs **speech.flac** (step_4_tts_f5 keeps ComfyUI's
+   SaveAudio suffix = FLAC). After it runs, convert:
+   `ffmpeg -y -i /workspace/infinitetalk-poc/input/speech.flac -ar 16000 -ac 1 /workspace/infinitetalk-poc/input/speech.wav`
+2. PHASE 6: the video-service /free REQUIRES a JSON body (bare POST = 422 and Wan
+   VRAM stays held). Use:
+   `curl -s -X POST http://127.0.0.1:8195/free -H "Content-Type: application/json" -d '{"targets":["wan","tts","lipsync"]}'`
+Note: `pip install flash-attn --no-build-isolation` compiles from source (~30 min),
+it is not a prebuilt wheel; GATE 2 correctly stops on failure.
