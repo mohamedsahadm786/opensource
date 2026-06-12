@@ -10,15 +10,15 @@
 
 ---
 
-## 1. ⏳ Audit the in-flight RIFE run (was still rendering at session end)
-A run with **interp_target_fps=32** (and realism 0.45/0.75) was in flight. The video
-job payload was already verified to carry `interp_fps: 32`. When it finishes:
-- Pod log must show `[rife] 16 -> 32 fps` lines — **they only print at the stitch
-  step, i.e. the very END of assembly** (silence mid-run is normal, not a break).
-  Watch: `tail -F /workspace/video-service/service.log | grep -E "\[rife\]|sampling overrides"`
-- DB: `videos.fps` must be **32**; `media_generations` assembly row's `params` must
-  carry `interp_fps` (these prove the TASK 3b fixes).
-- **Eyeball the video** — the whole point: does 32 fps kill the choppy AI look?
+## 1. ✅ RIFE run AUDITED (2026-06-12 16:01) — only the eyeball verdict left
+DB + logs all green: `[rife]` line per clip before concat, `videos.fps`=**50**
+(real measured int), assembly params recorded `interp_fps:32 / wan_params:null`.
+- **DISCOVERY**: LatentSync outputs **25 fps** (not 16 — that's only Wan's render
+  rate; lipsync resamples 16→25 with duplicated frames, which is why the choppy
+  cadence survived). RIFE doubles what it receives → final = **50 fps**. The knob
+  effectively means "2x smoothness"; final fps will read 50 in the DB. Cosmetic
+  TODO: rename the web option label "32 fps" → "2x (smooth)".
+- 👁 STILL TO DO: watch the video vs yesterday's — is the stop-motion AI feel gone?
   Also judge the realism knobs (0.45/0.75) on the image.
 
 ## 2. ⏳ P6 live verification (config snapshot — code all shipped, one restart left)
