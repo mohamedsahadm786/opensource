@@ -183,7 +183,7 @@ realism_params, and the realism log must show
 
 ---
 
-## TASK 3 — web-tunable video quality: Wan sampling knobs + RIFE 16→32 fps (status: PENDING)
+## TASK 3 — web-tunable video quality: Wan sampling knobs + RIFE 16→32 fps (status: code SHIPPED by pod Claude 2026-06-12, reviewed by repo Claude — correct; deploy + RIFE install + restarts + live verify still pending; two minor fixes + silentfirst extension in TASK 3b)
 
 Copy-paste everything between the lines to the pod Claude:
 
@@ -291,5 +291,86 @@ VERIFY (the owner drives the runs from the PC/web)
    visibly longer (~1.4x per clip).
 4. jobs.request_payload for the video job (owner checks from the PC) contains
    wan_params / interp_fps exactly as saved in the web.
+
+------------------------------------------------------------------------------------
+
+---
+
+## TASK 3b — TASK 3 review fixes (fps metadata + knob audit) + silentfirst support (status: PENDING)
+
+Repo-Claude reviewed the TASK 3 implementation (gateway app.py, worker.py,
+video_service_app.py) line by line: the chain is CORRECT at every hop (fields
+present, conditional forwarding, lipsync-before-RIFE order, all-None no-op).
+Two minor issues + the owner now wants silentfirst covered too.
+
+Copy-paste everything between the lines to the pod Claude:
+
+------------------------------------------------------------------------------------
+
+CONTEXT
+Your TASK 3 implementation was reviewed against the repo side — verdict: correct,
+ship it. Three follow-ups before/with deployment (these are amendments to the same
+three files; fold them in BEFORE the restarts so everything deploys once).
+
+FIX 1 — videos.fps is hardcoded and will be WRONG once RIFE runs
+/workspace/alluvi-gateway/worker.py handle_video writes `"fps": 16` into the
+videos upsert. With interp_fps=32 the stored mp4 is 32 fps but the DB says 16
+(breaks the owner's verification query and the audit trail).
+  a. video-service app.py: after assembly, ffprobe the final file's real fps
+     (avg_frame_rate of v:0, evaluate the fraction) and include it in the
+     /video/generate response as "fps".
+  b. worker.py: write `"fps": data.get("fps", 16)` in the videos upsert.
+
+FIX 2 — record the knobs in the DB audit trail
+The media_generations "assembly" row's params dict should also carry the knobs
+that produced the video (the per-shot _request.json on disk dies with the temp
+dir). In worker.py handle_video, add to the assembly params:
+  "wan_params": p.get("wan_params"), "interp_fps": p.get("interp_fps")
+(null when unset is fine — that IS the audit information.)
+
+FIX 3 — extend wan_params + RIFE to the SILENTFIRST path (owner's request)
+In video-service app.py:
+  a. _build_silentfirst: accept wan_params=None and interp_fps=None kwargs, and
+     pass them from the /video/generate handler exactly like the multishot branch.
+  b. Thread wan_params into its inner render() the same way:
+       wp = wan_params or {}
+       wan.generate(..., sampling_steps=wp.get("steps"),
+                    cfg_high=wp.get("cfg_high"), cfg_low=wp.get("cfg_low"))
+  c. RIFE placement for silentfirst is DIFFERENT from multishot — this matters:
+     silentfirst is ONE continuous take with a single lip-sync pass at the end,
+     so interpolate ONCE on the FINAL lip-synced video, NOT per silent clip:
+       - per-clip would run BEFORE the single lipsync -> LatentSync would process
+         2x frames (~2x lipsync cost) — wrong;
+       - the final video is one continuous performance, so a single pass is safe
+         (framematch seams blend near-identical frames; a punchin_fallback seam
+         gets one 1/32 s blended frame — acceptable, note it in your report).
+     Concretely, after `f = lip.generate(...)`:
+       final_path = f["local_path"]
+       if interp_fps and int(interp_fps) > 0:
+           from video_pipeline import interpolate_rife
+           r = interpolate_rife.interpolate(final_path, Path(final_path).parent / "final_32.mp4",
+                                            target_fps=int(interp_fps), scene_id=f"{scene_id}#rife")
+           final_path = r["local_path"]
+     BEFORE the extend_tail call (the held-frame tail must freeze a frame of the
+     ALREADY-interpolated video so the whole file has one fps).
+
+CONSTRAINTS (unchanged from TASK 3)
+- Knobless payloads byte-identical to today in BOTH modes. No re-clamping (the
+  repo's _apply_sampling clamps). No prompt/workflow/LatentSync/storage changes.
+- Multishot keeps its existing per-clip-in-stitch RIFE (already correct).
+
+THEN DEPLOY (the original TASK 3 steps, now once for everything)
+1. curl the 3 repo files into /workspace/alluvi-clean/video_pipeline/ (backups
+   first; sanity greps from TASK 3 step 4).
+2. Install + smoke-test Practical-RIFE (TASK 3 step 5) BEFORE any pipeline run.
+3. Deploy the amended gateway app.py / worker.py / video-service app.py
+   (drift-anchor greps first), restart gateway + worker + video-service.
+
+VERIFY (adds to TASK 3's four checks)
+5. One SILENTFIRST run with steps=28 + interp 32 (web: video mode = silentfirst):
+   log shows sampling overrides on the silent renders, ONE [rife] line at the end
+   (not per clip), stored mp4 ~32 fps, audio + lipsync intact.
+6. videos.fps in the DB equals the real ffprobe fps (32 with RIFE, 16 without).
+7. The media_generations assembly row's params contains wan_params/interp_fps.
 
 ------------------------------------------------------------------------------------
