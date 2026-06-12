@@ -391,3 +391,90 @@ render. Change the worker's videos upsert line to:
   "fps": int(round(float(data.get("fps") or 16))),
 Everything else in the cumulative files is verified correct — ship after this one change.
 ------------------------------------------------------------------------------------
+
+---
+
+## TASK 4 — InfiniteTalk proof-of-concept (video.md P7) — FULLY ISOLATED pod experiment (status: PENDING)
+
+Copy-paste everything between the lines to the pod Claude:
+
+------------------------------------------------------------------------------------
+
+CONTEXT
+You maintain the Alluvi GPU-pod services. This task is DIFFERENT from all previous
+ones: it is a pure EXPERIMENT, not a pipeline change. Today's video mode renders each
+shot independently with Wan I2V from the same still, then LatentSync dubs the mouth —
+gestures can't couple to speech and every shot restarts from the same frame.
+InfiniteTalk (MeiGen-AI, open source, Wan-based) takes ONE image + the FULL speech
+audio and generates ONE continuous audio-driven video (81-frame chunks with frame
+carry-over, built-in continuity, audio-driven body motion + lips). If it looks better
+than our multishot output, it becomes a new video_mode later — but THIS task is only:
+install it in isolation, render ONE video, and report a verdict.
+
+THE ISOLATION CONTRACT (hard rules — these outrank everything else in this task)
+1. EVERYTHING lives under /workspace/infinitetalk-poc/ — code, its own venv, model
+   weights, inputs, outputs. Deleting that one folder must remove every trace.
+2. Create a DEDICATED venv (python -m venv /workspace/infinitetalk-poc/venv).
+   NEVER pip install into /workspace/ai-toolkit/venv — a requirements pin in that
+   shared venv already broke numpy for every service once today (2026-06-12).
+3. DO NOT modify ANY existing file: not /workspace/alluvi-gateway, not the
+   stage1/qwen/realism/video services, not /workspace/alluvi-clean, not either
+   ComfyUI install. READ-ONLY use of existing things is fine.
+4. No new services, no ports, no nohup daemons, nothing that auto-starts on boot.
+   The PoC runs as a foreground CLI command and exits.
+5. GPU safety: run ONLY when the pipeline is idle (the owner confirms). Before
+   generating, check free VRAM with nvidia-smi; if the pipeline's ComfyUI servers
+   hold too much, free them via the EXISTING /free endpoints (that is an allowed,
+   normal operation) — never kill processes.
+6. Disk check FIRST: df -h /workspace. The weights are tens of GB (Wan base +
+   InfiniteTalk + wav2vec2). If free space is insufficient, STOP and report the
+   numbers — do not delete anything to make room.
+7. If installation hits a wall (dependency conflict, unavailable weights, OOM),
+   STOP and report what blocked you and what it needs. A clean "blocked because X"
+   is a successful outcome for a PoC; hacking the environment is not.
+
+INPUTS (the owner provides via Jupyter upload into /workspace/infinitetalk-poc/input/)
+- anchor.jpg — ONE finished step3 realism image (downloaded from the web console's
+  Publishing panel; 768x1344 portrait).
+- EITHER speech.wav (if the owner has one) OR dialogue.txt (plain text, ~2-4
+  sentences). If only dialogue.txt is given: synthesize the full audio ONCE using
+  the repo's existing TTS path (video_pipeline/step_4_tts_f5 via ComfyUI :8189 with
+  the standard voice voices_examples/female/female_02.wav) so the voice matches the
+  pipeline's — read-only usage, run from the shared venv only for this synthesis
+  step, installing NOTHING. Save the wav into the poc folder.
+
+YOUR TASK
+1. Research the current (June 2026) recommended install path for InfiniteTalk
+   image-to-video inference (the MeiGen-AI/InfiniteTalk repo's own CLI is preferred
+   over ComfyUI wrappers for isolation). Identify exactly which weights it needs
+   (Wan base model, InfiniteTalk checkpoint, wav2vec2 audio encoder) and their
+   sizes BEFORE downloading; report the plan, then proceed if disk allows.
+2. Install into /workspace/infinitetalk-poc/ per the isolation contract. If any
+   weight our existing installs already have can be reused READ-ONLY by absolute
+   path (e.g. a Wan checkpoint), prefer pointing at it over re-downloading — but
+   never move/modify/symlink-into the original locations.
+3. Generate ONE continuous video: anchor.jpg + the full speech audio -> one mp4,
+   portrait orientation, length = the audio length. 480P output is acceptable for
+   the verdict (note the upscale path exists if adopted). Save as
+   /workspace/infinitetalk-poc/out/infinitetalk_poc.mp4 + a settings.json
+   recording every parameter used (model versions, resolution, steps, seed,
+   render time, peak VRAM).
+4. REPORT (the deliverable):
+   - install: what was installed, where, total disk used, anything reused read-only
+   - render: wall-clock time vs our multishot (~9 min per 5s clip), peak VRAM
+   - and the honest quality verdict vs a recent pipeline video on the SAME kind of
+     scene, dimension by dimension: lip-sync accuracy vs LatentSync, body-gesture/
+     speech coupling, identity stability over time, PRODUCT stability (does the box
+     stay rigid/readable — our hardest requirement), background consistency,
+     overall "real creator" feel.
+   - recommendation: adopt as a new video_mode (what the integration would take),
+     needs more evaluation, or reject (why).
+
+VERIFY (owner, from the PC)
+- ffprobe the output (duration matches the audio, one continuous stream).
+- Watch it side-by-side with the latest multishot video.
+- Confirm isolation: `ls /workspace/infinitetalk-poc` contains everything;
+  `git -C /workspace/alluvi-clean status 2>/dev/null || true` and the service
+  folders show no modifications; all services still healthy on 8191-8195.
+
+------------------------------------------------------------------------------------
