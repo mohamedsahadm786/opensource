@@ -11,6 +11,7 @@
 ---
 
 ## 1. ✅ RIFE runs AUDITED + owner verdict: ARTIFACTS — knob turned OFF for now
+**→ FULL write-up + fix options in `finding.md` (read it before discussing).**
 Wiring 100% green (payload, `[rife]` lines, `videos.fps`=50 measured int, assembly
 params). Discoveries (full detail in update.md v6 + this audit):
 - **LatentSync outputs 25 fps** (Wan renders 16; lipsync resamples with duplicated
