@@ -1,102 +1,113 @@
-# pending.md — what is LEFT TO DO (rewritten 2026-06-12, end of session)
+# pending.md — what is LEFT TO DO (rewritten 2026-06-13, end of session)
 
-> **How to use:** next session, say "read update.md" (v6 section = full context of how
-> we got here), then work this list top-down. Everything COMPLETED has been removed —
-> this file is only open work. Items reference claudeAI.md TASK numbers (pod-side
-> prompts) and video.md P-numbers (roadmap).
+> **How to use:** next session, say "read update.md" (v7 section = how we got here +
+> full context), then work this list top-down. COMPLETED work has been removed — this
+> file is only open work. Items reference claudeAI.md TASK numbers (pod-side prompts),
+> video.md P-numbers (roadmap), and finding.md (the RIFE write-up).
 
 ## Status legend
 ⏳ waiting on something   🔨 to build   👁 watch/judge (no building)   🧹 housekeeping
 
 ---
 
-## 1. ✅ RIFE runs AUDITED + owner verdict: ARTIFACTS — knob turned OFF for now
-**→ FULL write-up + fix options in `finding.md` (read it before discussing).**
-Wiring 100% green (payload, `[rife]` lines, `videos.fps`=50 measured int, assembly
-params). Discoveries (full detail in update.md v6 + this audit):
-- **LatentSync outputs 25 fps** (Wan renders 16; lipsync resamples with duplicated
-  frames). RIFE doubles what it receives → 50 fps, not 32. Knob = "2x smoothness".
-- **OWNER VERDICT (2026-06-12 evening): RIFE output REJECTED in current form**:
-  1. **Seam-morph artifact**: shots >5s are built from frame_join'd Wan chunks;
-     those internal seams were invisible single-frame cuts at 16/25 fps, but RIFE
-     interpolates ACROSS them → a 1-2 frame morph/warp = "sudden artificial
-     shifting" (worst in silentfirst — every seam in the whole take morphs).
-     The shot-to-shot cuts are NOT the problem (RIFE is per-clip there).
-  2. **mp4v / browser-codec bug**: Practical-RIFE writes OpenCV mp4v → browsers show
-     BLACK +audio-only (Supabase/web preview); local players fine. Bit the silentfirst
-     final (multishot escaped via the punch-in libx264 re-encode). NOT just a RIFE
-     issue — any path whose final step doesn't re-encode can ship a bad codec.
-     **FIXED + HARDENED in repo (2026-06-13)**: new `video_pipeline/web_normalize.py`
-     (`ensure_web_playable`) wired into `stitch.stitch()` + silentfirst `build_one()`
-     guarantees H.264/yuv420p on every final video. **Deploy = claudeAI.md TASK 5**
-     (curl 3 files + ONE guard call in the pod's `_build_silentfirst` + restart);
-     safe to deploy NOW even with RIFE off. Full write-up in finding.md §4.
-- **ACTION TAKEN: Frame interpolation = Off** in Run settings (old behavior back).
-- NEXT (design, when prioritized): **seam-aware RIFE** — frame_join returns seam
-  timestamps; split at seams → interpolate segments → rejoin with clean cuts.
-  ALTERNATIVE: P3's native 24 fps Wan render (+50% cost, zero seam issues) may be
-  the better smoothness lever. Decide after P7's verdict.
+## 1. ⏳ ACTIVATE the browser-codec guard — ONE video-service restart left
+The web-safety guard (`video_pipeline/web_normalize.py` → `ensure_web_playable`) is
+**deployed to disk** on the pod (repo files curled; the guard call folded into the
+COMMON return path of `/workspace/video-service/app.py`; `py_compile` clean — see
+claudeAI.md TASK 5 + update.md v7). It is **NOT YET ACTIVE**: the running `:8195`
+process predates the edit. Owner is bundling the restart with the new-ComfyUI pod work.
+- **Restart command** (after the ComfyUI work, when no run is in-flight):
+  ```
+  kill $(ss -tlnp | grep ':8195' | grep -oP 'pid=\K[0-9]+' | head -1)
+  cd /workspace/video-service && source /workspace/ai-toolkit/venv/bin/activate && ALLUVI_REPO=/workspace/alluvi-clean nohup python app.py > /workspace/video-service/service.log 2>&1 &
+  ```
+  Verify: `ss -tlnp | grep ':8195'` listening + `tail -n 20 service.log` clean boot.
+- **⚠️ UNTIL the restart: keep 32 fps / RIFE OFF.** No-RIFE output is H.264 natively
+  (proven — video d96010db renders in the browser), but a RIFE run before the restart
+  writes mp4v → black screen again. After the restart, the guard is live and 32 fps
+  can be turned back on (it then guarantees H.264 even with RIFE).
+- After verifying: mark claudeAI.md TASK 5 DONE.
 
-## 2. ⏳ P6 live verification (config snapshot — code all shipped, one restart left)
-The PC's `run_worker.py` process predates the P6 commit and doesn't pass `--job-id`.
-AFTER the in-flight run finishes:
-1. PC worker terminal → Ctrl+C → `python run_worker.py` again.
-2. Hard-refresh the web app (Ctrl+Shift+R — new bundle sends the snapshot).
-3. Next web run: the worker terminal must print
-   `[pipeline] config source: snapshot (frozen at Run click)` and the job's
-   request_payload must contain `config_snapshot`. Once seen → the
-   "Save → wait → Run" rule is officially obsolete; mark P6 DONE in video.md.
+## 2. 🔨 Orchestrator robustness — stop the false "run complete"
+`run_pipeline._poll` does `requests.get(...).raise_for_status()` with NO error
+handling, and Phase C swallows the exception as "video ✗ FAILED" → `pipeline_run`
+finishes `succeeded` even though no video was produced (update.md v7 #3; bit us when a
+pod worker restart caused a transient gateway error mid-render). Fix: make `_poll`
+TOLERATE transient gateway errors (retry/backoff on connection + 5xx, only give up
+after N consecutive failures), so a pod hiccup never false-completes a run. Until then:
+**"run complete" in the web = the `pipeline_run` job status, NOT proof a video exists**
+— verify via the `videos` table / the video sub-job.
 
-## 3. 🔨 Close TASK 3/3b verification (remaining A/B runs, one knob at a time)
+## 3. ⏳/👁 RIFE seam-morph artifact — design decision (knob OFF, safe)
+**→ FULL write-up + 3 fix options in `finding.md` (read it before discussing).**
+RIFE wiring is 100% green; the OUTPUT was rejected for the seam-morph artifact (RIFE
+interpolating across hidden frame_join seams = a visible warp). Knob is OFF → pipeline
+is back to proven pre-RIFE behavior; nothing broken/urgent. Options: (1) seam-aware
+RIFE (surgical, keeps near-free cost), (2) Wan native 24 fps (+50% render, structurally
+clean), (3) RIFE only on single-chunk footage (cheap stopgap). Recommended sequence:
+keep OFF → finish the P7 InfiniteTalk verdict first (may change the whole video
+strategy) → then choose Option 1 vs 2. (The mp4v half of finding.md is now item 1.)
+
+## 4. ⏳ P6 config-snapshot — live verify still pending
+Code shipped (`5b1f5a5`). REMAINING: restart `run_worker.py` on the PC (the old
+process doesn't pass `--job-id`), hard-refresh the web (Ctrl+Shift+R), then one web run
+must print `[pipeline] config source: snapshot (frozen at Run click)` in the worker
+terminal and carry `config_snapshot` in the job payload. Then the "Save → wait → Run"
+rule is obsolete → mark video.md P6 DONE.
+
+## 5. 🔨 Close TASK 3/3b verification (A/B runs, one knob at a time)
 - **Knobless control run**: all video-quality fields empty → NO `[rife]`/`sampling
-  overrides` lines, `videos.fps`=16 (proves zero regression + the int fallback).
-- **Sampling run**: steps=28, CFG motion=4.5 → log shows
-  `sampling overrides: {'steps': 28, 'split_step': 14, 'cfg_high': 4.5}`, ~1.4x render.
-- **Silentfirst run**: mode=silentfirst + steps + interp 32 → sampling lines on the
-  silent renders and **exactly ONE** `[rife]` line at the end (not per clip).
+  overrides` lines, `videos.fps`=16/25 (control + int fallback). Safe to run now.
+- **Sampling run**: steps=28, CFG motion=4.5 → log shows `sampling overrides: {...}`,
+  ~1.4x render. Safe to run now (no RIFE).
+- **Silentfirst + interp run**: mode=silentfirst + steps + interp 32 → **MUST WAIT
+  until the codec guard is active (item 1)** — else mp4v black. Then expect sampling
+  lines on the silent renders + exactly ONE `[rife]` line at the end.
 - Then mark claudeAI.md TASK 3 + 3b DONE and video.md P2+P3 DONE.
 
-## 4. ⏳ TASK 4 / P7 — InfiniteTalk PoC (prompt already given to the pod Claude)
-The isolated-experiment prompt (claudeAI.md TASK 4) was handed to the pod Claude at
-session end; its reply was NOT yet reviewed. Next session: paste its output to
-repo-Claude for review. Owner side: upload `anchor.jpg` (a step3 image from
-Publishing) + `dialogue.txt` (2–4 sentences) into `/workspace/infinitetalk-poc/input/`
-via Jupyter, run ONLY when the pipeline is idle. Deliverable = one continuous video +
-verdict vs multishot (lipsync, gesture-speech coupling, identity, PRODUCT stability,
-render cost) → adopt / evaluate more / reject.
+## 6. ⏳ TASK 4 / P7 — InfiniteTalk PoC (prompt already given to the pod Claude)
+The isolated-experiment prompt (claudeAI.md TASK 4 + addendum) was handed to the pod
+Claude; its reply was NOT yet reviewed. Next: paste its output to repo-Claude for
+review. Owner side: upload `anchor.jpg` (a step3 image) + `dialogue.txt` into
+`/workspace/infinitetalk-poc/input/` via Jupyter, run ONLY when the pipeline is idle.
+Deliverable = one continuous video + verdict vs multishot (lipsync, gesture-speech
+coupling, identity, PRODUCT stability, render cost) → adopt / evaluate more / reject.
+This verdict feeds the RIFE decision (item 3) and P8.
 
-## 5. 👁 video.md P1 leftovers (watch & judge)
-- Watch the recent rendered videos (V1–V3 as pixels): patio, gym bench, office desk.
+## 7. 👁 video.md P1 leftovers (watch & judge)
+- Watch recent rendered videos as pixels (patio, gym bench, office desk, pilates mat).
 - One 20 s / 4-shot run to see the full shot-plan arc in a real render.
 - Watch `qc_checks.hand_render_quality` across runs; tune `QC_HAND_QUALITY_MIN`
-  (env, default 7) if it over/under-fires. NOTE: today's run took 2 step2 attempts —
-  the stricter hand gate burning a retry, as predicted. Expected until P4 ships.
+  (env, default 7) if it over/under-fires. (Recent runs took 2–3 step2 attempts — the
+  stricter hand gate burning retries, as predicted. Expected until P4 ships.)
 
-## 6. 🔨 The build queue after that (video.md order)
+## 8. 🔨 The build queue after that (video.md order)
 - **P4 — source-side hand refinement** (hand-detect → inpaint after step2/step3;
   raises the floor the QC hand gate measures; brings the fail rate back down).
-  Pod-side workflow + a claudeAI.md task when prioritized.
-- **P5 — video QC gate** (nothing judges rendered VIDEOS today; design choice:
-  per-shot vs final-video gate).
-- **P8 — parked** (last-frame chaining / FLF2V / LoRA fine-tune; evidence-gated,
-  do not start without a trigger — P7's verdict feeds this).
+- **P5 — video QC gate** (nothing judges rendered VIDEOS today; per-shot vs final-video
+  gate — design choice).
+- **P8 — parked** (last-frame chaining / FLF2V / LoRA fine-tune; evidence-gated; P7's
+  verdict feeds this — do not start without a trigger).
 
-## 7. 🔨 Image-side root fix (oldest open quality item)
-`held_with_phone` scenarios still genuinely render a 3rd hand (Qwen keeps the phone
-AND adds two box-hands). QC now fails these correctly → they burn retries. Root fix =
-step-2 prompt pattern for phone scenarios (likely: single box-hand only, never
-instruct the phone hand).
+## 9. 🔨 Image-side root fix (oldest open quality item)
+`held_with_phone` scenarios still genuinely render a 3rd hand (Qwen keeps the phone AND
+adds two box-hands). QC now fails these correctly → they burn retries. Root fix = step-2
+prompt pattern for phone scenarios (likely: single box-hand only, never instruct the
+phone hand).
 
-## 8. 🧹 Housekeeping
-- Delete the untracked temp helpers when the tuning round closes:
+## 10. 🧹 Housekeeping
+- **Commit + push the doc updates** from this session if wanted (update.md v7,
+  pending.md, finding.md, claudeAI.md TASK 5 status) — currently local-only; not needed
+  on the pod, but keeps git history current.
+- Pod `.bak` files left by TASK 5 curls (`stitch.py.bak3`, `interpolate_rife.py.bak`,
+  `app.py.bak_*`) — delete once the guard restart is verified good.
+- Delete untracked temp helpers when the tuning round closes:
   `orchestrator/_qc_*.py`, `_show_script.py`, `_run_debug.py`, `_dump_prompts.py`,
   `_realism_paramtest.py`, `_video_paramtest.py`, `_p6_paramtest.py`,
   `_rerun_gym_test.py`, `orchestrator/_qc_audit/`.
-- `supabase_pipeline.zip` appeared untracked in the repo root — owner to confirm
-  whether it's needed or deletable.
+- `supabase_pipeline.zip` (untracked in repo root) — confirm needed or deletable.
 - Replace the green-background test angle photo with a real industry 3/4 shot.
-- GPU-host-from-DB (v3 item): orchestrator still reads GATEWAY_URL from `.env`;
-  the web Settings GPU field is stored but unused. Update `.env` on every pod restart
-  until wired.
-- Web product-brief form: add a hint to enter REAL package measurements
-  (re-saving the brief regenerates packaging).
+- GPU-host-from-DB (v3 item): orchestrator still reads GATEWAY_URL from `.env`; the web
+  Settings GPU field is stored but unused. Update `.env` on every pod restart until wired.
+- Web product-brief form: add a hint to enter REAL package measurements (re-saving the
+  brief regenerates packaging).

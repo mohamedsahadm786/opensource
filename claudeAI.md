@@ -494,7 +494,18 @@ it is not a prebuilt wheel; GATE 2 correctly stops on failure.
 
 ---
 
-## TASK 5 — guarantee every final video plays in the browser (web-safety codec guard) (status: PENDING — repo files ready, deploy + one-line silentfirst wiring + restart left)
+## TASK 5 — guarantee every final video plays in the browser (web-safety codec guard) (status: DEPLOYED TO DISK 2026-06-13, ACTIVATES ON NEXT video-service RESTART)
+<!-- 2026-06-13: repo pushed (commit 05d77c5). On the pod: the 3 repo files were curled
+into /workspace/alluvi-clean (greps pass), and the pod Claude folded the guard call into
+the COMMON return path of /workspace/video-service/app.py (one ensure_web_playable() after
+both _build_multishot/_build_silentfirst set final_path, before read_bytes/_dur/_fps — an
+improvement over the literal task: one line covers BOTH modes + the reported fps/duration
+reflect the normalized file). py_compile clean. NOT YET ACTIVE: the running :8195 process
+predates the edit (file replaced != process running). Owner is bundling the restart with
+new-ComfyUI pod work. UNTIL that restart: keep 32 fps / RIFE OFF (no-RIFE output is H.264
+natively, proven by video d96010db; a RIFE run before the restart would write mp4v -> black
+again). After restart, the guard is live and 32 fps can be turned back on. -->
+
 
 Copy-paste everything between the lines to the pod Claude:
 

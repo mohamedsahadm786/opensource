@@ -9,6 +9,105 @@
 
 ---
 
+## v7 — browser-codec guard (videos render in the web), false-"complete" diagnosis, codec guard deployed-to-disk (2026-06-13 session — READ THIS FIRST)
+
+> This session resumed from a clean shutdown. It HARDENED the "black video in the
+> browser" fix into a universal guard, deployed it to the pod's disk (activation
+> pending one restart), and diagnosed two confusing live symptoms (a run showing
+> "complete" with no video, and media "not loading" in the web). Commit `05d77c5`
+> pushed. Where this disagrees with v6 below, this wins. **`pending.md` was fully
+> rewritten this session — it is the to-do list; read it after this.**
+
+### 1. The mp4v "black in browser" bug is bigger than RIFE — now fixed universally
+- Symptom (from v6 / finding.md): some final videos play after download but show a
+  BLACK frame + audio-only in the web lightbox and Supabase preview. Browsers only
+  decode H.264 (avc1) + yuv420p in a `<video>` tag.
+- **Root cause is NOT only RIFE.** Traced every final-video path: multishot's
+  copy-concat (single shot / punch-in off) and silentfirst's LatentSync output
+  **preserve their source codec with no re-encode**, so a non-H.264 source ships
+  unchanged. RIFE (mp4v from OpenCV) was just the most visible leak. The old
+  point-fix (`0ae13f8`, re-encode inside `interpolate_rife.py`) only plugged RIFE.
+- **The fix = one guard at the end of every path:** NEW
+  `video_pipeline/web_normalize.py` → `ensure_web_playable(path, out_path=None, *,
+  scene_id)`: probes the real streams; already-H.264/yuv420p/AAC → near-instant
+  stream-copy remux (`+faststart`, ZERO quality loss); anything else → re-encode to
+  H.264/yuv420p + AAC. Idempotent + cheap on good files. Wired into
+  `multishot/stitch.py` `stitch()` (auto-covers multishot, which the pod calls) and
+  silentfirst CLI `build_one()`. Repo files compile clean (`py_compile`).
+- **Pushed:** commit `05d77c5` on `main` (verified live on raw.githubusercontent).
+
+### 2. claudeAI.md TASK 5 = the pod deploy for the guard — DEPLOYED TO DISK, restart pending
+- Pod steps done this session WITH the owner: curled `web_normalize.py` +
+  `stitch.py` + `interpolate_rife.py` into `/workspace/alluvi-clean` (greps pass);
+  the pod Claude folded the guard call into the **COMMON return path** of
+  `/workspace/video-service/app.py` — ONE `ensure_web_playable()` after both
+  `_build_multishot`/`_build_silentfirst` set `final_path`, BEFORE
+  `read_bytes()`/`_dur()`/`_fps()`. This is an improvement over the literal task:
+  one line covers BOTH modes and the reported `fps`/`duration` reflect the
+  normalized file. `py_compile` clean.
+- **NOT YET ACTIVE:** the running `:8195` process predates the edit
+  (`file replaced != process running`). Owner is bundling the video-service restart
+  with separate new-ComfyUI pod work. **⚠️ Until that restart: keep 32 fps / RIFE
+  OFF** — no-RIFE output is H.264 natively (proven, see #4), but a RIFE run before
+  the restart would write mp4v → black again. After restart, guard is live and
+  32 fps can return.
+
+### 3. "The run showed COMPLETE but I couldn't see a video" — diagnosed
+- The web progress pill keys off the **`pipeline_run` job status**, not the video.
+  Today's run `ad9bf703` flipped to `succeeded` at 09:42 while its video sub-job
+  was still `running` (locked by the pod, 3h visibility) with no `videos` row.
+- **Mechanism (a real robustness bug):** `run_pipeline._poll` does
+  `requests.get(...).raise_for_status()` with NO error handling. The pod's gateway
+  worker restarted mid-render (the owner's storage-increase disrupted it — the
+  RunPod banner appeared twice in the worker terminal), causing a transient gateway
+  error during polling. That exception bubbled up; Phase C's try/except swallowed it
+  as `video ✗ FAILED` and let `pipeline_run` finish `succeeded` → premature
+  "complete." The pod then recovered, re-claimed the still-locked video job, and
+  finished it at 10:10, writing the `videos` row AFTER the run already showed done.
+- **Takeaway:** "Run complete" in the web ≠ "a video exists." Verify via the
+  `videos` table / the video sub-job. Fix queued in pending.md (make `_poll`
+  tolerate transient gateway errors instead of false-completing the run).
+- Confirmed only ONE run happened today (08:37, the owner's 32-fps-OFF run) — no
+  phantom/auto/duplicate runs.
+
+### 4. Empirical resolution: no-RIFE silentfirst renders fine in the browser
+- The completed video `d96010db` (silentfirst, `interp_fps=null`) came out at
+  **fps 25, H.264** and PLAYS in the web. This proves the black-screen bug was
+  **RIFE-specific** (Practical-RIFE writes mp4v); LatentSync's own output is H.264.
+  So with 32 fps OFF, videos render in the web today even before the guard is active.
+
+### 5. "Nothing is loading in the web" scare — it was a stale browser tab
+- Lightbox showed a black video + "Image unavailable" for the source image. Proved
+  the BACKEND was healthy: range-GET the video object (HTTP 206, video/mp4) and the
+  image (206, image/jpeg), and minted a signed URL (200) directly with the secret
+  key — all fine. Cause = an expired signed URL on a long-open tab. **Hard-refresh
+  (Ctrl+Shift+R) fixed it.** Not related to any code change (the commit touched only
+  `video_pipeline/*.py` + markdown; the web app was untouched).
+
+### Operational discoveries (2026-06-13 — save time next session)
+- **"Run complete" = `pipeline_run` job status, not video existence.** A pod worker
+  restart mid-render (e.g. from a storage change) throws a transient gateway error
+  that `_poll` doesn't tolerate → Phase C swallows it → run false-completes; the pod
+  still finishes the job (3h visibility) and writes the `videos` row late.
+- **no-RIFE silentfirst = 25 fps, H.264** (browser-safe). multishot no-RIFE = 16 fps.
+  RIFE on = 50 fps + (pre-guard) mp4v.
+- **Stale web tab → expired signed URLs → "Image unavailable" + black video.**
+  Hard-refresh re-mints. Storage health is verifiable with the secret key: range-GET
+  `/storage/v1/object/<bucket>/<path>` and POST `/storage/v1/object/sign/...`.
+- **`file replaced != process running`** still bites: the guard is on disk but inert
+  until `:8195` restarts.
+
+### Where to resume (priority order)
+**→ `pending.md` is the canonical list (rewritten this session).** Short form:
+1. Restart the video-service `:8195` (with the new-ComfyUI work) → guard goes live →
+   then 32 fps can be turned back on. Until then keep RIFE OFF.
+2. (optional hardening) make `run_pipeline._poll` tolerate transient gateway errors
+   so a pod hiccup never false-completes a run.
+3. Then the still-open v6 items: P6 snapshot live-verify, TASK 3/3b closure runs,
+   TASK 4/P7 InfiniteTalk review+run, the RIFE seam-morph design decision.
+
+---
+
 ## v6 — knob-chain completion: realism verified, video quality knobs (P2+P3), config snapshot (P6), InfiniteTalk PoC launched (2026-06-12 session — READ THIS FIRST)
 
 > This session closed TASK 2 (realism knobs) after finding+fixing the gateway bug that

@@ -131,11 +131,14 @@ proper fix is a single web-safety guard at the end of every path:
   zero quality loss); anything else → re-encode to H.264/yuv420p + AAC. Idempotent.
 - Wired into `stitch.stitch()` (auto-covers multishot, which the pod calls) and the
   silentfirst CLI `build_one()`.
-**Deploy = claudeAI.md TASK 5** (curl `web_normalize.py` + `stitch.py` +
-`interpolate_rife.py`, add ONE guard call to the pod's `_build_silentfirst`, restart
-video-service). Safe to deploy NOW even with the RIFE knob off — it only normalizes
-the final container/codec; already-good files are untouched. Acceptance test: the
-video PLAYS in the web lightbox + Supabase preview (no black screen).
+**Deploy = claudeAI.md TASK 5.** Status (2026-06-13, commit 05d77c5): the 3 repo files
+are curled onto the pod and the guard call is folded into the COMMON return path of the
+video-service app.py (py_compile clean) — but the running :8195 process predates the edit,
+so the guard is **NOT YET ACTIVE**. Owner is bundling the video-service restart with
+new-ComfyUI pod work. ⚠️ Until that restart, keep the RIFE knob OFF (no-RIFE output is
+H.264 natively — proven by video d96010db rendering fine in the browser; a RIFE run before
+the restart would write mp4v again). Acceptance test after restart: the video PLAYS in the
+web lightbox + Supabase preview (no black screen).
 
 ---
 
