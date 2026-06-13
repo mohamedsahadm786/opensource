@@ -22,11 +22,15 @@ params). Discoveries (full detail in update.md v6 + this audit):
      interpolates ACROSS them → a 1-2 frame morph/warp = "sudden artificial
      shifting" (worst in silentfirst — every seam in the whole take morphs).
      The shot-to-shot cuts are NOT the problem (RIFE is per-clip there).
-  2. **mp4v codec bug**: Practical-RIFE writes OpenCV mp4v → browsers show BLACK
-     +audio-only (Supabase/web preview); local players fine. Bit the silentfirst
-     final (multishot escaped via the punch-in libx264 re-encode).
-     **FIXED in repo** (`interpolate_rife.py` now normalizes to H.264) — pod still
-     needs: curl the file + restart video-service BEFORE any future RIFE run.
+  2. **mp4v / browser-codec bug**: Practical-RIFE writes OpenCV mp4v → browsers show
+     BLACK +audio-only (Supabase/web preview); local players fine. Bit the silentfirst
+     final (multishot escaped via the punch-in libx264 re-encode). NOT just a RIFE
+     issue — any path whose final step doesn't re-encode can ship a bad codec.
+     **FIXED + HARDENED in repo (2026-06-13)**: new `video_pipeline/web_normalize.py`
+     (`ensure_web_playable`) wired into `stitch.stitch()` + silentfirst `build_one()`
+     guarantees H.264/yuv420p on every final video. **Deploy = claudeAI.md TASK 5**
+     (curl 3 files + ONE guard call in the pod's `_build_silentfirst` + restart);
+     safe to deploy NOW even with RIFE off. Full write-up in finding.md §4.
 - **ACTION TAKEN: Frame interpolation = Off** in Run settings (old behavior back).
 - NEXT (design, when prioritized): **seam-aware RIFE** — frame_join returns seam
   timestamps; split at seams → interpolate segments → rejoin with clean cuts.

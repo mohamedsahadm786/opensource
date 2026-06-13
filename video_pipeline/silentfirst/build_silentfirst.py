@@ -156,6 +156,12 @@ def build_one(account, output, num_beats, base_seed, run_dir, handles,
         final_path = extend_tail.extend_tail(final_path, seconds=tail_seconds)
         print(f"    +{tail_seconds:.1f}s held-frame tail")
 
+    # Final web-safety guard: with outro silence (the default) extend_tail is skipped,
+    # so the LatentSync/RIFE output ships as-is — and its codec may be browser-
+    # undecodable (mp4v -> black-in-browser). Guarantee H.264/yuv420p before upload.
+    from video_pipeline import web_normalize
+    final_path = web_normalize.ensure_web_playable(final_path, scene_id=f"{sid}#web")
+
     (out_dir / "manifest.json").write_text(json.dumps({
         "method": "silentfirst", "account": account.get("tiktok_id"), "scenario_id": sid,
         "source_output_id": output["id"], "anchor_image": image_path, "num_beats": num_beats,

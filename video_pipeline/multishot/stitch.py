@@ -55,6 +55,11 @@ def stitch(clip_paths, out_path, *, punch_in: float = 1.0,
         subprocess.run(["ffmpeg","-y"]+inp+["-filter_complex",filt,"-map","[v]","-map","[a]",
                         "-c:v","libx264","-crf","18","-pix_fmt","yuv420p","-c:a","aac",
                         "-b:a","160k","-movflags","+faststart",str(out_path)], check=True)
+    # Final web-safety guard: the copy-concat path above preserves the input clips'
+    # codec, which (for a single shot / punch_in off) may be a browser-undecodable
+    # codec -> black-in-browser. Guarantee H.264/yuv420p/faststart before upload.
+    from video_pipeline import web_normalize
+    web_normalize.ensure_web_playable(out_path, scene_id="stitch/final")
     return str(out_path)
 
 

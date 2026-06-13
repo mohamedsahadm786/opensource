@@ -491,3 +491,77 @@ OUR repo code):
    `curl -s -X POST http://127.0.0.1:8195/free -H "Content-Type: application/json" -d '{"targets":["wan","tts","lipsync"]}'`
 Note: `pip install flash-attn --no-build-isolation` compiles from source (~30 min),
 it is not a prebuilt wheel; GATE 2 correctly stops on failure.
+
+---
+
+## TASK 5 — guarantee every final video plays in the browser (web-safety codec guard) (status: PENDING — repo files ready, deploy + one-line silentfirst wiring + restart left)
+
+Copy-paste everything between the lines to the pod Claude:
+
+------------------------------------------------------------------------------------
+
+CONTEXT
+Some final videos uploaded to the bucket show a BLACK frame + audio-only in the web
+console and the Supabase storage preview, but play fine after download. Root cause:
+the file's video codec is not browser-decodable. Browsers only decode H.264 (avc1) +
+yuv420p in a <video> tag. Two ways a bad codec reaches the bucket:
+  - Practical-RIFE / OpenCV writes mp4v (MPEG-4 Part 2) — bit the silentfirst final.
+  - the multishot copy-concat and the silentfirst lipsync output preserve whatever
+    codec their source had (no re-encode), so a non-h264 source ships unchanged.
+The repo now has the fix; this task deploys it and adds ONE call in the pod's
+silentfirst path.
+
+WHAT CHANGED ON THE REPO SIDE (already pushed to GitHub main)
+1. NEW module video_pipeline/web_normalize.py — `ensure_web_playable(path, out_path=None,
+   *, scene_id="?")`. Probes the real streams; if already h264/yuv420p/AAC it does a
+   near-instant stream-copy remux (+faststart only, no quality loss); otherwise it
+   re-encodes the video to h264/yuv420p + audio to AAC. Idempotent and cheap on good
+   files — safe to call on EVERY final video.
+2. video_pipeline/multishot/stitch.py — stitch() now calls ensure_web_playable() on its
+   own output as the last step. The multishot path that calls stitcher.stitch() is
+   therefore AUTO-COVERED once the new file is deployed; no pod code change for multishot.
+3. video_pipeline/interpolate_rife.py — already normalizes RIFE output to h264 (the
+   pending mp4v fix from finding.md §4 is folded into this same deploy bundle).
+
+YOUR TASK
+1. Deploy the repo files into /workspace/alluvi-clean (NOT a git clone — back up first):
+     cd /workspace/alluvi-clean
+     cp video_pipeline/multishot/stitch.py video_pipeline/multishot/stitch.py.bak3 2>/dev/null || true
+     cp video_pipeline/interpolate_rife.py video_pipeline/interpolate_rife.py.bak 2>/dev/null || true
+     curl -fsSL https://raw.githubusercontent.com/mohamedsahadm786/opensource/main/video_pipeline/web_normalize.py -o video_pipeline/web_normalize.py
+     curl -fsSL https://raw.githubusercontent.com/mohamedsahadm786/opensource/main/video_pipeline/multishot/stitch.py -o video_pipeline/multishot/stitch.py
+     curl -fsSL https://raw.githubusercontent.com/mohamedsahadm786/opensource/main/video_pipeline/interpolate_rife.py -o video_pipeline/interpolate_rife.py
+   Sanity:
+     test -f video_pipeline/web_normalize.py && grep -c "ensure_web_playable" video_pipeline/web_normalize.py   # >=1
+     grep -c "ensure_web_playable" video_pipeline/multishot/stitch.py                                            # >=1 (auto-covers multishot)
+     grep -c "libx264" video_pipeline/interpolate_rife.py                                                        # >=1 (mp4v fix present)
+2. The video-service (port 8195) SILENTFIRST path is your own _build_silentfirst code
+   (it does not use the repo's build_silentfirst.py), so add ONE guard call there. As
+   the LAST step before the file is uploaded / returned (AFTER lipsync, AFTER any RIFE
+   pass, AFTER extend_tail), do:
+     from video_pipeline import web_normalize
+     final_path = web_normalize.ensure_web_playable(final_path, scene_id=f"{scene_id}#web")
+   It is idempotent, so if you prefer, call it once in the COMMON upload codepath for
+   BOTH modes instead — double-applying with stitch's internal call is harmless (the
+   second call just sees h264 and does the fast remux).
+3. Restart the video-service (file replaced != process running):
+     kill $(ss -tlnp | grep ':8195' | grep -oP 'pid=\K[0-9]+' | head -1)
+     cd /workspace/video-service && source /workspace/ai-toolkit/venv/bin/activate && ALLUVI_REPO=/workspace/alluvi-clean nohup python app.py > /workspace/video-service/service.log 2>&1 &
+
+CONSTRAINTS
+- Do NOT change prompts, the workflow JSON, LatentSync params, the stitch/RIFE
+  placement, or storage paths. This guard ONLY touches the container/codec of the
+  final file.
+- Already-h264 files must NOT be re-encoded (no quality loss) — the module already
+  branches on this; do not force a re-encode.
+
+VERIFY (owner drives a run from the web; pod Claude can pre-check)
+1. After assembly, ffprobe the uploaded final mp4:
+     ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,pix_fmt -of default=nk=1 <file>
+   must print `h264` and `yuv420p` for BOTH modes.
+2. service.log shows one `[web_normalize] [...] remux (+faststart)` (already-good file)
+   or `... re-encode (mp4v/... -> h264/yuv420p)` (bad source) line per final video.
+3. Open the video in the web console lightbox AND the Supabase storage preview — it
+   PLAYS (no black screen). This is the acceptance test.
+
+------------------------------------------------------------------------------------

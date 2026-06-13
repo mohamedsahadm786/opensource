@@ -120,15 +120,22 @@ libx264 AFTER RIFE — masking the problem. In **silentfirst** RIFE runs last
 (extend_tail was skipped because outro > 0), so the raw mp4v file went straight
 to the bucket.
 
-**Status: FIXED in the repo** (commit `0ae13f8`): `interpolate_rife.py` now
-ALWAYS re-encodes its output to H.264 (libx264, crf 18, yuv420p, +faststart).
-**Deploy still pending:** curl the file to the pod + restart the video-service —
-must happen before any future RIFE run:
-```
-cd /workspace/alluvi-clean && curl -fsSL https://raw.githubusercontent.com/mohamedsahadm786/opensource/main/video_pipeline/interpolate_rife.py -o video_pipeline/interpolate_rife.py
-kill $(ss -tlnp | grep ':8195' | grep -oP 'pid=\K[0-9]+' | head -1)
-cd /workspace/video-service && source /workspace/ai-toolkit/venv/bin/activate && ALLUVI_REPO=/workspace/alluvi-clean nohup python app.py > /workspace/video-service/service.log 2>&1 &
-```
+**Status: FIXED in the repo + HARDENED beyond the RIFE case (2026-06-13).**
+The original point-fix (commit `0ae13f8`) made `interpolate_rife.py` re-encode its
+output to H.264. But mp4v was only the most-visible leak: the multishot copy-concat
+(single shot / punch-off) and the silentfirst lipsync output ALSO ship their source
+codec unchanged, so a non-h264 source would slip through even without RIFE. The
+proper fix is a single web-safety guard at the end of every path:
+- **NEW `video_pipeline/web_normalize.py`** → `ensure_web_playable()`: probes the
+  real streams; already-h264/yuv420p/AAC → instant stream-copy remux (+faststart,
+  zero quality loss); anything else → re-encode to H.264/yuv420p + AAC. Idempotent.
+- Wired into `stitch.stitch()` (auto-covers multishot, which the pod calls) and the
+  silentfirst CLI `build_one()`.
+**Deploy = claudeAI.md TASK 5** (curl `web_normalize.py` + `stitch.py` +
+`interpolate_rife.py`, add ONE guard call to the pod's `_build_silentfirst`, restart
+video-service). Safe to deploy NOW even with the RIFE knob off — it only normalizes
+the final container/codec; already-good files are untouched. Acceptance test: the
+video PLAYS in the web lightbox + Supabase preview (no black screen).
 
 ---
 
